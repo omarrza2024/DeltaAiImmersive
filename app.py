@@ -1,153 +1,141 @@
 """
 Interactive Finance Dashboard — stock trends, volatility comparison, correlation.
+
+Run with: streamlit run app.py
 """
 
 from __future__ import annotations
 
-import re
-
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
-import yfinance as yf
 
-TRADING_DAYS = 252
-PERIOD_OPTIONS = {
-    "1 month": "1mo",
-    "3 months": "3mo",
-    "6 months": "6mo",
-    "1 year": "1y",
-    "2 years": "2y",
-    "5 years": "5y",
-    "Max": "max",
+from finance_dashboard.config import DEFAULT_PERIOD_LABEL, PERIOD_OPTIONS
+from finance_dashboard.controller import VisualizationController
+from finance_dashboard.models import (
+    DashboardName,
+    UserInputError,
+    dedupe_tickers,
+    normalize_ticker,
+    parse_ticker_list,
+    period_index,
+)
+from finance_dashboard.recommender.models import FeatureName, RecommendationRequest, StrategyName
+from finance_dashboard.recommender.universe import ETF_FALLBACK_HOLDINGS, PREDEFINED_UNIVERSES
+
+# Human-readable labels for recommender controls.
+_FEATURE_LABELS: dict[str, str] = {
+    "Volatility": FeatureName.VOLATILITY.value,
+    "Returns": FeatureName.RETURNS.value,
+    "SMA": FeatureName.SMA.value,
+    "MACD": FeatureName.MACD.value,
+    "Fundamentals (beta, P/E)": FeatureName.FUNDAMENTALS.value,
+    "Sentiment (experimental)": FeatureName.SENTIMENT.value,
 }
-ROLLING_WINDOW = 21
+_STRATEGY_LABELS: dict[str, str] = {
+    "K-Means": StrategyName.KMEANS.value,
+    "Hard-coded rules": StrategyName.RULES.value,
+    "DBSCAN": StrategyName.DBSCAN.value,
+}
+# Grouping needs enough history for volatility/SMA/MACD; intraday ranges don't.
+_RECOMMENDER_PERIODS = ["1 month", "1 year", "5 years"]
 
 
-def normalize_ticker(raw: str) -> str:
-    s = raw.strip().upper()
-    s = re.sub(r"\s+", "", s)
-    return s
-
-
-def parse_ticker_list(text: str) -> list[str]:
-    parts = re.split(r"[\s,;]+", text.strip())
-    return [normalize_ticker(p) for p in parts if p.strip()]
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_history(tickers: tuple[str, ...], period: str) -> pd.DataFrame:
-    """Download adjusted close history for one or more tickers."""
-    if not tickers:
-        return pd.DataFrame()
-    t = list(tickers)
-    df = yf.download(
-        t,
-        period=period,
-        progress=False,
-        auto_adjust=True,
-        threads=True,
-    )
-    if df.empty:
-        return df
-    if len(t) == 1:
-        if isinstance(df.columns, pd.MultiIndex):
-            out = df["Close"].copy()
-        else:
-            out = df[["Close"]].copy()
-        out.columns = [t[0]]
-        return out
-    # Multiple tickers: columns are often MultiIndex (field, ticker)
-    if isinstance(df.columns, pd.MultiIndex):
-        if "Close" in df.columns.get_level_values(0):
-            out = df["Close"].copy()
-        else:
-            out = df.xs("Close", axis=1, level=0, drop_level=True)
-    else:
-        out = df[["Close"]].copy() if "Close" in df.columns else df.iloc[:, :1].copy()
-    out = out.sort_index()
-    return out
-
-
-def annualized_volatility(returns: pd.Series) -> float:
-    r = returns.dropna()
-    if len(r) < 2:
-        return float("nan")
-    return float(r.std() * np.sqrt(TRADING_DAYS))
-
-
-def fig_price_history(closes: pd.DataFrame, title: str) -> go.Figure:
-    fig = go.Figure()
-    for col in closes.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=closes.index,
-                y=closes[col],
-                mode="lines",
-                name=col,
-                hovertemplate="%{x|%Y-%m-%d}<br>%{y:,.2f}<extra></extra>",
-            )
+def _render_sidebar_defaults() -> str:
+    """Sidebar holds shared defaults only; dashboards live in tabs."""
+    with st.sidebar:
+        st.subheader("Defaults")
+        return st.selectbox(
+            "Default time range",
+            list(PERIOD_OPTIONS.keys()),
+            index=period_index(DEFAULT_PERIOD_LABEL, list(PERIOD_OPTIONS.keys())),
+            key="default_period",
         )
-    fig.update_layout(
-        title=title,
-        xaxis_title="Date",
-        yaxis_title="Price (adj. close)",
-        hovermode="x unified",
-        template="plotly_dark",
-        height=480,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=48, r=24, t=56, b=48),
+
+
+def _render_price_inputs(default_period: str) -> tuple[list[str], str]:
+    ticker_raw = st.text_input("Ticker", value="AAPL", key="price_ticker")
+    period_label = st.selectbox(
+        "Time range",
+        list(PERIOD_OPTIONS.keys()),
+        index=period_index(default_period, list(PERIOD_OPTIONS.keys())),
+        key="price_period",
     )
-    return fig
+    return [normalize_ticker(ticker_raw)], period_label
 
 
-def fig_rolling_vol(rolling: pd.DataFrame, title: str) -> go.Figure:
-    fig = go.Figure()
-    for col in rolling.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=rolling.index,
-                y=rolling[col] * 100,
-                mode="lines",
-                name=col,
-                hovertemplate="%{x|%Y-%m-%d}<br>%{y:.2f}%<extra></extra>",
-            )
+def _render_compare_inputs(default_period: str) -> tuple[list[str], str, None]:
+    st.markdown("Compare **annualized** and **rolling volatility** for two stocks.")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        ta = st.text_input("Stock A", value="AAPL", key="compare_a")
+    with c2:
+        tb = st.text_input("Stock B", value="MSFT", key="compare_b")
+    with c3:
+        period_label = st.selectbox(
+            "Time range",
+            list(PERIOD_OPTIONS.keys()),
+            index=period_index(default_period, list(PERIOD_OPTIONS.keys())),
+            key="compare_period",
         )
-    fig.update_layout(
-        title=title,
-        xaxis_title="Date",
-        yaxis_title="Annualized vol. (%, 21-day rolling)",
-        hovermode="x unified",
-        template="plotly_dark",
-        height=420,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=48, r=24, t=56, b=48),
+    return [normalize_ticker(ta), normalize_ticker(tb)], period_label, None
+
+
+def _render_correlation_inputs(default_period: str) -> tuple[list[str], str, None]:
+    st.markdown(
+        "Enter tickers (comma or newline separated). Correlations use **daily log returns**."
     )
-    return fig
+    tickers_text = st.text_area("Tickers", value="AAPL, MSFT, GOOGL", height=100, key="corr_text")
+    period_label = st.selectbox(
+        "Time range",
+        list(PERIOD_OPTIONS.keys()),
+        index=period_index(default_period, list(PERIOD_OPTIONS.keys())),
+        key="corr_period",
+    )
+    return dedupe_tickers(parse_ticker_list(tickers_text)), period_label, None
 
 
-def fig_correlation_heatmap(corr: pd.DataFrame) -> go.Figure:
-    fig = go.Figure(
-        data=go.Heatmap(
-            z=corr.values,
-            x=corr.columns.tolist(),
-            y=corr.index.tolist(),
-            zmin=-1,
-            zmax=1,
-            colorscale="RdBu",
-            zmid=0,
-            colorbar=dict(title="ρ"),
-            hovertemplate="%{y} vs %{x}<br>ρ = %{z:.3f}<extra></extra>",
+def _render_recommender_tab(controller: VisualizationController, default_period: str) -> None:
+    st.markdown(
+        "Group stocks into **risk buckets** (Low / Medium / High ±) from an ETF's "
+        "holdings, predefined universes, and/or your own tickers."
+    )
+    with st.form("recommender_form"):
+        c1, c2, c3 = st.columns(3)
+        etf = c1.selectbox("ETF (optional)", ["None"] + sorted(ETF_FALLBACK_HOLDINGS))
+        universes = c2.multiselect("Predefined universes", list(PREDEFINED_UNIVERSES))
+        period_label = c3.selectbox(
+            "Time range",
+            _RECOMMENDER_PERIODS,
+            index=period_index(default_period, _RECOMMENDER_PERIODS),
         )
-    )
-    fig.update_layout(
-        title="Return correlation matrix",
-        template="plotly_dark",
-        height=max(360, 48 * len(corr)),
-        margin=dict(l=80, r=24, t=56, b=80),
-    )
-    return fig
+        custom_text = st.text_input("Extra tickers (comma separated)", value="")
+        c4, c5 = st.columns(2)
+        features = c4.multiselect(
+            "Features", list(_FEATURE_LABELS), default=["Volatility", "Returns"]
+        )
+        strategy = c5.selectbox("Grouping strategy", list(_STRATEGY_LABELS))
+        submitted = st.form_submit_button("Get recommendations")
+
+    if not submitted:
+        st.info("Choose your sources and press **Get recommendations**.")
+        return
+
+    try:
+        request = RecommendationRequest.from_user_input(
+            etf=None if etf == "None" else etf,
+            universe_names=universes,
+            custom_tickers_text=custom_text,
+            feature_names=[_FEATURE_LABELS[f] for f in features],
+            strategy_name=_STRATEGY_LABELS[strategy],
+            period=PERIOD_OPTIONS[period_label],
+        )
+        controller.show_appropriate_dashboard(
+            DashboardName.RECOMMENDER,
+            tickers=[],
+            period_label=period_label,
+            request=request,
+        )
+    except UserInputError as exc:
+        st.error(str(exc))
 
 
 def main() -> None:
@@ -157,7 +145,6 @@ def main() -> None:
         layout="wide",
         initial_sidebar_state="expanded",
     )
-
     st.markdown(
         """
         <style>
@@ -167,173 +154,51 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
-
     st.title("Finance Dashboard")
     st.caption("Live market data via Yahoo Finance — for education only, not investment advice.")
 
-    with st.sidebar:
-        st.subheader("Defaults")
-        default_period_label = st.selectbox(
-            "Default history range",
-            list(PERIOD_OPTIONS.keys()),
-            index=3,
-        )
-        default_period = PERIOD_OPTIONS[default_period_label]
+    default_period = _render_sidebar_defaults()
+    controller = VisualizationController()
 
-    tab_trends, tab_vol, tab_corr = st.tabs(
-        ["Stock trends", "Volatility compare", "Correlation"]
+    tab_price, tab_compare, tab_corr, tab_recommend = st.tabs(
+        ["Prices & volatility", "Compare two stocks", "Correlation", "Recommender"]
     )
 
-    # --- Tab 1: single stock trends ---
-    with tab_trends:
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            t_single = st.text_input("Ticker", value="AAPL", key="trend_ticker")
-            period_t = st.selectbox(
-                "Period",
-                list(PERIOD_OPTIONS.keys()),
-                index=list(PERIOD_OPTIONS.values()).index(default_period)
-                if default_period in PERIOD_OPTIONS.values()
-                else 3,
-                key="trend_period",
+    with tab_price:
+        tickers, period_label = _render_price_inputs(default_period)
+        try:
+            controller.show_appropriate_dashboard(
+                DashboardName.PRICE_METRICS,
+                tickers=tickers,
+                period_label=period_label,
             )
-        ticker = normalize_ticker(t_single)
-        period_key = PERIOD_OPTIONS[period_t]
+        except UserInputError as exc:
+            st.error(str(exc))
 
-        if not ticker:
-            st.warning("Enter a ticker symbol.")
-        else:
-            with st.spinner(f"Loading {ticker}…"):
-                hist = fetch_history((ticker,), period_key)
-            if hist.empty or ticker not in hist.columns:
-                st.error(f"No data for **{ticker}**. Check the symbol and try again.")
-            else:
-                last = hist[ticker].iloc[-1]
-                first = hist[ticker].iloc[0]
-                chg = (last / first - 1.0) * 100 if first and first != 0 else float("nan")
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Last adj. close", f"{last:,.2f}")
-                m2.metric("Period change", f"{chg:+.2f}%" if np.isfinite(chg) else "—")
-                m3.metric("Trading days", len(hist))
-
-                fig = fig_price_history(hist, f"{ticker} — price history")
-                st.plotly_chart(fig, use_container_width=True)
-
-    # --- Tab 2: two-stock volatility ---
-    with tab_vol:
-        st.markdown("Pick two tickers to compare **annualized volatility** and **rolling volatility**.")
-        vc1, vc2, vc3 = st.columns(3)
-        with vc1:
-            ta = st.text_input("Stock A", value="AAPL", key="vol_a")
-        with vc2:
-            tb = st.text_input("Stock B", value="MSFT", key="vol_b")
-        with vc3:
-            period_v = st.selectbox(
-                "Period",
-                list(PERIOD_OPTIONS.keys()),
-                index=list(PERIOD_OPTIONS.values()).index(default_period)
-                if default_period in PERIOD_OPTIONS.values()
-                else 3,
-                key="vol_period",
+    with tab_compare:
+        tickers, period_label, _ = _render_compare_inputs(default_period)
+        try:
+            controller.show_appropriate_dashboard(
+                DashboardName.COMPARE_TWO,
+                tickers=tickers,
+                period_label=period_label,
             )
+        except UserInputError as exc:
+            st.error(str(exc))
 
-        a, b = normalize_ticker(ta), normalize_ticker(tb)
-        pv = PERIOD_OPTIONS[period_v]
-
-        if not a or not b:
-            st.warning("Enter both tickers.")
-        elif a == b:
-            st.warning("Choose two different tickers to compare.")
-        else:
-            with st.spinner("Loading prices…"):
-                h2 = fetch_history((a, b), pv)
-            if h2.empty or not {a, b}.issubset(set(h2.columns)):
-                st.error("Could not load both series. Verify tickers and try again.")
-            else:
-                rets = h2.pct_change().dropna()
-                vol_a = annualized_volatility(rets[a])
-                vol_b = annualized_volatility(rets[b])
-                roll = rets.rolling(ROLLING_WINDOW).std() * np.sqrt(TRADING_DAYS)
-
-                b1, b2 = st.columns(2)
-                b1.metric(f"{a} ann. volatility", f"{vol_a * 100:.2f}%" if np.isfinite(vol_a) else "—")
-                b2.metric(f"{b} ann. volatility", f"{vol_b * 100:.2f}%" if np.isfinite(vol_b) else "—")
-
-                st.plotly_chart(
-                    fig_rolling_vol(roll, f"Rolling volatility — {a} vs {b}"),
-                    use_container_width=True,
-                )
-
-                comp = pd.DataFrame(
-                    {
-                        "Ticker": [a, b],
-                        "Annualized volatility (%)": [
-                            vol_a * 100 if np.isfinite(vol_a) else np.nan,
-                            vol_b * 100 if np.isfinite(vol_b) else np.nan,
-                        ],
-                    }
-                )
-                fig_bar = go.Figure(
-                    data=go.Bar(
-                        x=comp["Ticker"],
-                        y=comp["Annualized volatility (%)"],
-                        marker_color=["#636EFA", "#EF553B"],
-                        text=[f"{v:.2f}%" if np.isfinite(v) else "—" for v in comp["Annualized volatility (%)"]],
-                        textposition="outside",
-                    )
-                )
-                fig_bar.update_layout(
-                    title="Annualized volatility comparison (daily returns, √252)",
-                    template="plotly_dark",
-                    yaxis_title="Volatility (%)",
-                    height=360,
-                    showlegend=False,
-                    margin=dict(l=48, r=24, t=56, b=48),
-                )
-                st.plotly_chart(fig_bar, use_container_width=True)
-
-    # --- Tab 3: correlation ---
     with tab_corr:
-        st.markdown(
-            "Add tickers (comma or newline separated). Correlations use **daily log returns** over the selected period."
-        )
-        tickers_text = st.text_area(
-            "Tickers",
-            value="AAPL, MSFT, GOOGL",
-            height=100,
-            key="corr_text",
-        )
-        period_c = st.selectbox(
-            "Period",
-            list(PERIOD_OPTIONS.keys()),
-            index=list(PERIOD_OPTIONS.values()).index(default_period)
-            if default_period in PERIOD_OPTIONS.values()
-            else 3,
-            key="corr_period",
-        )
-        tickers = parse_ticker_list(tickers_text)
-        tickers = list(dict.fromkeys(tickers))
-        pc = PERIOD_OPTIONS[period_c]
+        tickers, period_label, _ = _render_correlation_inputs(default_period)
+        try:
+            controller.show_appropriate_dashboard(
+                DashboardName.CORRELATION,
+                tickers=tickers,
+                period_label=period_label,
+            )
+        except UserInputError as exc:
+            st.error(str(exc))
 
-        if len(tickers) < 2:
-            st.warning("Enter at least two distinct tickers.")
-        else:
-            with st.spinner("Downloading series…"):
-                hc = fetch_history(tuple(tickers), pc)
-            missing = [t for t in tickers if t not in hc.columns]
-            if missing:
-                st.error(f"No data for: {', '.join(missing)}")
-            hc = hc[[c for c in tickers if c in hc.columns]]
-            if hc.shape[1] < 2:
-                st.error("Need at least two valid series for correlation.")
-            else:
-                log_rets = np.log(hc / hc.shift(1)).dropna()
-                if len(log_rets) < 10:
-                    st.warning("Very few overlapping days; correlation may be unreliable.")
-                corr = log_rets.corr()
-                st.plotly_chart(fig_correlation_heatmap(corr), use_container_width=True)
-                with st.expander("Numeric correlation matrix"):
-                    st.dataframe(corr.round(3), use_container_width=True)
+    with tab_recommend:
+        _render_recommender_tab(controller, default_period)
 
 
 if __name__ == "__main__":
