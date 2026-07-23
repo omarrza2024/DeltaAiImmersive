@@ -95,6 +95,13 @@ class StockRecommendation:
     group_id: int
     features: dict[str, float] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # RiskLabel is a str-Enum, so pandas (with future.infer_string, as on
+        # Streamlit Cloud) can coerce it to plain str during a DataFrame
+        # roundtrip. Coerce back so `.value` and isinstance checks work.
+        if not isinstance(self.risk_label, RiskLabel):
+            object.__setattr__(self, "risk_label", RiskLabel(self.risk_label))
+
 
 @dataclass(frozen=True)
 class PortfolioProfile:

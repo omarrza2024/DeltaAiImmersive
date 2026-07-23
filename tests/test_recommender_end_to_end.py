@@ -143,6 +143,27 @@ def test_portfolio_profile_summarizes_buckets():
     assert profile.total == 6
 
 
+def test_recommendation_risk_label_is_always_enum():
+    """Regression: pandas may coerce str-Enum values to plain str during the
+    DataFrame roundtrip inside RiskLabeler, breaking `r.risk_label.value`."""
+    from finance_dashboard.recommender.models import StockRecommendation
+
+    # Direct construction with a plain string simulates what pandas returns on
+    # Streamlit Cloud (pandas future.infer_string coerces our str-Enum).
+    rec = StockRecommendation(
+        ticker="AAPL", risk_label="Low Risk", risk_score=42.0, group_id=0
+    )
+    assert isinstance(rec.risk_label, RiskLabel)
+    assert rec.risk_label is RiskLabel.LOW
+    assert rec.risk_label.value == "Low Risk"
+
+    # End-to-end: every recommendation must have an enum, not a str.
+    result = make_recommender().recommend(base_request())
+    for r in result.recommendations:
+        assert isinstance(r.risk_label, RiskLabel), f"{r.ticker} label is {type(r.risk_label)}"
+        _ = r.risk_label.value  # would AttributeError if str slipped through
+
+
 def test_recommender_uses_universe_provider_for_etf():
     provider = UniverseProvider(holdings_fetcher=lambda etf: list(UNIVERSE))
     recommender = StockRecommender(fetcher=synthetic_prices, universe_provider=provider)
