@@ -2,21 +2,49 @@
 
 from __future__ import annotations
 
+import html
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from finance_dashboard.charts import PALETTE
 from finance_dashboard.dashboards import BaseDashboard
+from finance_dashboard.data import company_name
 from finance_dashboard.models import UserInputError
 from finance_dashboard.recommender.models import RecommendationRequest, RiskLabel
 from finance_dashboard.recommender.recommender import StockRecommender
 
+# Chip color per risk label, sourced from the app palette.
 _LABEL_COLORS = {
-    RiskLabel.LOW.value: "#2E8B57",
-    RiskLabel.MEDIUM.value: "#DAA520",
-    RiskLabel.HIGH_POSITIVE.value: "#FF7F0E",
-    RiskLabel.HIGH_NEGATIVE.value: "#D62728",
+    RiskLabel.LOW.value:            "#22C55E",
+    RiskLabel.MEDIUM.value:         "#F59E0B",
+    RiskLabel.HIGH_POSITIVE.value:  "#14B8A6",
+    RiskLabel.HIGH_NEGATIVE.value:  "#F87171",
 }
+
+# Per-bucket theme for the KPI chips at the top.
+_BUCKET_TONE = {
+    RiskLabel.LOW: "low",
+    RiskLabel.MEDIUM: "med",
+    RiskLabel.HIGH_POSITIVE: "pos",
+    RiskLabel.HIGH_NEGATIVE: "neg",
+}
+
+
+def _bucket_kpi_row(profile) -> None:
+    """Render the four risk-bucket KPIs as themed chips."""
+    tiles = []
+    for label in RiskLabel:
+        tone = _BUCKET_TONE[label]
+        count = profile.counts[label]
+        tiles.append(
+            f'<div class="kpi {tone}">'
+            f'<div class="kpi-label">{html.escape(label.value)}</div>'
+            f'<div class="kpi-value">{count}</div>'
+            f'</div>'
+        )
+    st.markdown(f'<div class="kpi-row">{"".join(tiles)}</div>', unsafe_allow_html=True)
 
 
 class RecommenderDashboard(BaseDashboard):
@@ -37,35 +65,58 @@ class RecommenderDashboard(BaseDashboard):
         with st.spinner("Fetching data and grouping stocks…"):
             result = StockRecommender().recommend(request)
 
-        profile = result.profile
-        cols = st.columns(len(RiskLabel))
-        for col, label in zip(cols, RiskLabel):
-            col.metric(label.value, profile.counts[label])
+        _bucket_kpi_row(result.profile)
 
-        table = pd.DataFrame(
-            [
+        rows = []
+        for r in result.recommendations:
+            rows.append(
                 {
                     "Ticker": r.ticker,
+                    "Company": company_name(r.ticker) or "",
                     "Risk": r.risk_label.value,
                     "Risk score": round(r.risk_score, 1),
-                    **{k: round(v, 4) for k, v in r.features.items()},
+                    "Return %":     round(r.features.get("returns", 0) * 100, 2),
+                    "Volatility %": round(r.features.get("volatility", 0) * 100, 2),
                 }
-                for r in result.recommendations
-            ]
+            )
+        table = pd.DataFrame(rows)
+
+        st.dataframe(
+            table,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Ticker":       st.column_config.TextColumn(width="small"),
+                "Company":      st.column_config.TextColumn(width="medium"),
+                "Risk":         st.column_config.TextColumn(width="small"),
+                "Risk score":   st.column_config.ProgressColumn(
+                    "Risk score", min_value=0, max_value=100, format="%.0f", width="medium"
+                ),
+                "Return %":     st.column_config.NumberColumn(format="%+.2f %%"),
+                "Volatility %": st.column_config.NumberColumn(format="%.2f %%"),
+            },
         )
-        st.dataframe(table, use_container_width=True, hide_index=True)
 
         chart_df = table.rename(columns={"Risk score": "score"})
         fig = px.bar(
             chart_df.sort_values("score"),
-            x="score",
-            y="Ticker",
+            x="score", y="Ticker",
             color="Risk",
             color_discrete_map=_LABEL_COLORS,
             orientation="h",
-            title="Risk score by stock — bucket first, volatility rank within it",
+            title="Risk score — bucket band + within-bucket volatility rank",
         )
-        fig.update_layout(height=max(320, 28 * len(chart_df) + 120))
+        fig.update_layout(
+            height=max(320, 28 * len(chart_df) + 120),
+            template="plotly_dark",
+            paper_bgcolor="#131A22",
+            plot_bgcolor="#131A22",
+            font=dict(color="#E5EDF6", size=13),
+            colorway=PALETTE,
+            xaxis=dict(gridcolor="#1E2A36"),
+            yaxis=dict(gridcolor="#1E2A36"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
         st.plotly_chart(fig, use_container_width=True)
 
         if result.skipped:

@@ -162,8 +162,15 @@ def main() -> None:
     st.markdown(
         """
         <style>
-        .block-container { padding-top: 1.25rem; }
-        h1 { letter-spacing: -0.02em; }
+        .block-container { padding-top: 1.5rem; max-width: 1200px; }
+        h1, h2, h3 { letter-spacing: -0.02em; font-weight: 600; }
+        h1 { font-size: 2.15rem; margin-bottom: 0.15rem; }
+
+        /* Tab bar: cleaner, teal underline instead of Streamlit red. */
+        .stTabs [data-baseweb="tab-list"] { gap: 1.5rem; border-bottom: 1px solid #1E2A36; }
+        .stTabs [data-baseweb="tab"] { padding: 0.5rem 0.25rem; font-weight: 500; }
+        .stTabs [aria-selected="true"] { color: #14B8A6 !important; }
+
         /* Selectboxes: plain dropdown feel — pointer cursor, no caret, no typing.
            Multiselects keep typing enabled so autocomplete/search works. */
         div[data-baseweb="select"],
@@ -172,12 +179,59 @@ def main() -> None:
             caret-color: transparent !important;
             pointer-events: none !important;
         }
+
+        /* Stock header (used by Prices / Compare tabs). */
+        .stock-header { display:flex; align-items:baseline; gap:0.6rem; margin:0.25rem 0 0; }
+        .stock-ticker { font-size:1.35rem; font-weight:700; letter-spacing:-0.01em; color:#E5EDF6; }
+        .stock-name   { color:#8A9BA8; font-size:0.9rem; }
+        .stock-sub    { color:#8A9BA8; font-size:0.78rem; margin:0.1rem 0 0.75rem; }
+
+        /* KPI row shared across all tabs. */
+        .kpi-row      { display:flex; flex-wrap:wrap; gap:0.6rem; margin:0.25rem 0 1rem; }
+        .kpi          { flex:1 1 130px; padding:0.6rem 0.85rem; background:#131A22;
+                        border:1px solid #1E2A36; border-radius:10px; min-width:120px; }
+        .kpi-label    { color:#8A9BA8; font-size:0.72rem; text-transform:uppercase;
+                        letter-spacing:0.06em; font-weight:600; }
+        .kpi-value    { color:#E5EDF6; font-size:1.4rem; font-weight:600;
+                        letter-spacing:-0.01em; margin-top:0.15rem; }
+        .kpi.pos .kpi-value  { color:#2DD4BF; }
+        .kpi.neg .kpi-value  { color:#F87171; }
+        .kpi.low .kpi-value  { color:#4ADE80; }
+        .kpi.med .kpi-value  { color:#FBBF24; }
+        .kpi.high .kpi-value { color:#F87171; }
+
+        /* Recommendation card look & chips. */
+        .rec-card { padding: 0.25rem 0.25rem 0 0.25rem; }
+        .rec-header { display:flex; align-items:baseline; gap:0.6rem; margin-bottom:0.25rem; }
+        .rec-ticker { font-size:1.35rem; font-weight:700; letter-spacing:-0.01em; }
+        .rec-name   { color:#8A9BA8; font-size:0.9rem; }
+        .rec-rank   { background:#14B8A6; color:#0B0F14; font-weight:700;
+                      padding:0.1rem 0.55rem; border-radius:999px; font-size:0.75rem;
+                      letter-spacing:0.03em; }
+        .chip-row   { display:flex; flex-wrap:wrap; gap:0.4rem; margin:0.35rem 0 0.5rem; }
+        .chip       { padding:0.15rem 0.6rem; border-radius:6px; font-size:0.8rem;
+                      font-weight:500; background:#1B2530; color:#CBD5DE; }
+        .chip.pos   { background:rgba(20,184,166,0.16); color:#2DD4BF; }
+        .chip.neg   { background:rgba(239,68,68,0.16);  color:#F87171; }
+        .chip.low   { background:rgba(34,197,94,0.16);  color:#4ADE80; }
+        .chip.med   { background:rgba(234,179,8,0.16);  color:#FBBF24; }
+        .chip.high  { background:rgba(239,68,68,0.16);  color:#F87171; }
+
+        /* Match-score bar. */
+        .match-bar { display:flex; align-items:center; gap:0.6rem; margin:0.15rem 0 0.35rem; }
+        .match-bar .label { font-size:0.78rem; color:#8A9BA8; min-width:75px; }
+        .match-bar .track { flex:1; height:6px; background:#1B2530; border-radius:3px;
+                            overflow:hidden; }
+        .match-bar .fill  { height:100%; background:linear-gradient(90deg,#14B8A6,#2DD4BF);
+                            border-radius:3px; }
+        .match-bar .val   { font-size:0.85rem; color:#E5EDF6; font-weight:600;
+                            min-width:38px; text-align:right; }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    st.title("Finance Dashboard")
-    st.caption("Live market data via Yahoo Finance — for education only, not investment advice.")
+    st.markdown("# 📈 Signal Studio")
+    st.caption("Explore, screen, and reason about equities — powered by live market data, SEC filings, and an AI advisor.")
 
     default_period = _render_sidebar_defaults()
     controller = VisualizationController()

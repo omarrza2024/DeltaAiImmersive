@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -22,8 +23,35 @@ from finance_dashboard.charts import (
     fig_volatility_bar,
 )
 from finance_dashboard.config import PERIOD_OPTIONS, ROLLING_WINDOW, TRADING_DAYS
-from finance_dashboard.data import fetch_history
+from finance_dashboard.data import company_name, fetch_history
 from finance_dashboard.models import UserInputError
+
+
+def _stock_header(ticker: str, period_label: str) -> None:
+    """Render a two-line header: ticker + company name, then period caption."""
+    name = company_name(ticker) or ""
+    st.markdown(
+        f'<div class="stock-header">'
+        f'<span class="stock-ticker">{html.escape(ticker)}</span>'
+        f'<span class="stock-name">{html.escape(name)}</span>'
+        f'</div>'
+        f'<div class="stock-sub">{html.escape(period_label)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _kpi(label: str, value: str, tone: str = "") -> str:
+    """Return an HTML string for one KPI tile — used inside a chip-row layout."""
+    return (
+        f'<div class="kpi {tone}">'
+        f'<div class="kpi-label">{html.escape(label)}</div>'
+        f'<div class="kpi-value">{value}</div>'
+        f'</div>'
+    )
+
+
+def _render_kpis(kpis: list[str]) -> None:
+    st.markdown(f'<div class="kpi-row">{"".join(kpis)}</div>', unsafe_allow_html=True)
 
 
 class BaseDashboard(ABC):
@@ -67,10 +95,13 @@ class PriceMetricsDashboard(BaseDashboard):
         rets = hist.pct_change().dropna()
         ann_vol = annualized_volatility(rets[ticker]) if not rets.empty else float("nan")
 
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Last adj. close", f"{series.iloc[-1]:,.2f}")
-        m2.metric("Period change", f"{chg:+.2f}%" if np.isfinite(chg) else "—")
-        m3.metric("Ann. volatility", f"{ann_vol * 100:.2f}%" if np.isfinite(ann_vol) else "—")
+        _stock_header(ticker, period_label)
+        tone = "pos" if np.isfinite(chg) and chg >= 0 else "neg"
+        _render_kpis([
+            _kpi("Last adj. close", f"{series.iloc[-1]:,.2f}"),
+            _kpi("Period change", f"{chg:+.2f}%" if np.isfinite(chg) else "—", tone=tone),
+            _kpi("Ann. volatility", f"{ann_vol * 100:.2f}%" if np.isfinite(ann_vol) else "—"),
+        ])
 
         st.plotly_chart(
             fig_price_history(hist, f"{ticker} — price history"),
@@ -120,8 +151,12 @@ class CompareTwoDashboard(BaseDashboard):
         roll = rolling_annualized_volatility(rets)
 
         c1, c2 = st.columns(2)
-        c1.metric(f"{a} ann. volatility", f"{vol_a * 100:.2f}%" if np.isfinite(vol_a) else "—")
-        c2.metric(f"{b} ann. volatility", f"{vol_b * 100:.2f}%" if np.isfinite(vol_b) else "—")
+        with c1:
+            _stock_header(a, period_label)
+            _render_kpis([_kpi("Ann. volatility", f"{vol_a * 100:.2f}%" if np.isfinite(vol_a) else "—")])
+        with c2:
+            _stock_header(b, period_label)
+            _render_kpis([_kpi("Ann. volatility", f"{vol_b * 100:.2f}%" if np.isfinite(vol_b) else "—")])
 
         st.plotly_chart(
             fig_rolling_vol(roll, f"Rolling volatility — {a} vs {b}"),
@@ -168,6 +203,11 @@ class CorrelationDashboard(BaseDashboard):
             st.warning("Very few overlapping days; correlation may be unreliable.")
 
         corr = log_rets.corr()
+        _render_kpis([
+            _kpi("Tickers", str(hist.shape[1])),
+            _kpi("Trading days", f"{len(log_rets):,}"),
+            _kpi("Time range", period_label),
+        ])
         st.plotly_chart(fig_correlation_heatmap(corr), use_container_width=True)
         with st.expander("Numeric correlation matrix"):
             st.dataframe(corr.round(3), use_container_width=True)

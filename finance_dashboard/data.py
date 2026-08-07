@@ -36,6 +36,16 @@ def extract_close_prices(df: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
     return out.sort_index()
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def company_name(ticker: str) -> str | None:
+    """Best-effort short-name lookup for headers/cards. None on any failure."""
+    try:
+        info = yf.Ticker(ticker).info or {}
+        return info.get("shortName") or info.get("longName") or None
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def fetch_history(tickers: tuple[str, ...], period: str) -> pd.DataFrame:
     """Download adjusted close history for one or more tickers."""
