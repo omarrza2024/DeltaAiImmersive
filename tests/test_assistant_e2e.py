@@ -146,3 +146,51 @@ def test_data_fetch_failure_surfaces_error():
     reply = assistant.handle_message(state, "10% return, low risk, tech, 3 picks")
     assert reply.recommendations == []
     assert "data" in reply.message.lower() or "unavailable" in reply.message.lower()
+
+
+def test_followup_chat_does_not_rerun_recommender():
+    """After recommendations, chit-chat must NOT re-trigger the pipeline."""
+    goal_json = _goal_json(
+        target_annual_return_pct=8.0,
+        max_volatility_pct=50.0,
+        sectors=["Tech"],
+        max_recommendations=2,
+    )
+    initial_explain = "Here are your top picks."
+    chat_reply = "Sure, happy to just chat — the picks stand for now."
+    assistant, llm = make_assistant([goal_json, initial_explain, goal_json, chat_reply])
+    state = assistant.new_state()
+    state.custom_tickers = ("CALM1", "CALM2", "WILD1", "WILD2", "WILD3")
+
+    first = assistant.handle_message(state, "10% return, moderate, tech, top 2")
+    assert first.recommendations, "first turn should produce recommendations"
+
+    second = assistant.handle_message(state, "just chat with me, no more picks")
+    assert second.recommendations == [], "follow-up chat must not re-list picks"
+    # Only 4 LLM calls: parse + explain + parse + chat. Not another explain call.
+    assert len(llm.calls) == 4
+
+
+def test_followup_with_changed_constraint_reruns_recommender():
+    """When the user changes a constraint, we DO re-recommend."""
+    goal_json = _goal_json(
+        target_annual_return_pct=8.0,
+        max_volatility_pct=50.0,
+        sectors=["Tech"],
+        max_recommendations=2,
+    )
+    goal_json_higher = _goal_json(
+        target_annual_return_pct=20.0,
+        max_volatility_pct=50.0,
+        sectors=["Tech"],
+        max_recommendations=2,
+    )
+    assistant, llm = make_assistant(
+        [goal_json, "picks A", goal_json_higher, "picks B"]
+    )
+    state = assistant.new_state()
+    state.custom_tickers = ("CALM1", "CALM2", "WILD1", "WILD2", "WILD3")
+
+    assistant.handle_message(state, "10% return, moderate, tech, top 2")
+    second = assistant.handle_message(state, "actually make it 20%")
+    assert second.recommendations, "changed target return must trigger a re-run"

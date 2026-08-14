@@ -15,13 +15,16 @@ from finance_dashboard.models import UserInputError
 from finance_dashboard.recommender.models import RecommendationRequest, RiskLabel
 from finance_dashboard.recommender.recommender import StockRecommender
 
-# Chip color per risk label, sourced from the app palette.
-_LABEL_COLORS = {
-    RiskLabel.LOW.value:            "#22C55E",
-    RiskLabel.MEDIUM.value:         "#F59E0B",
-    RiskLabel.HIGH_POSITIVE.value:  "#14B8A6",
-    RiskLabel.HIGH_NEGATIVE.value:  "#F87171",
-}
+def _label_colors() -> dict[str, str]:
+    """Chart color per risk label — Low/HighNegative follow the user's gain/loss picks."""
+    gain = st.session_state.get("gain_color", "#00E676")
+    loss = st.session_state.get("loss_color", "#FF3B30")
+    return {
+        RiskLabel.LOW.value:            gain,
+        RiskLabel.MEDIUM.value:         "#FFB800",
+        RiskLabel.HIGH_POSITIVE.value:  "#3B82F6",
+        RiskLabel.HIGH_NEGATIVE.value:  loss,
+    }
 
 # Per-bucket theme for the KPI chips at the top.
 _BUCKET_TONE = {
@@ -102,22 +105,22 @@ class RecommenderDashboard(BaseDashboard):
             chart_df.sort_values("score"),
             x="score", y="Ticker",
             color="Risk",
-            color_discrete_map=_LABEL_COLORS,
+            color_discrete_map=_label_colors(),
             orientation="h",
             title="Risk score — bucket band + within-bucket volatility rank",
         )
         fig.update_layout(
             height=max(320, 28 * len(chart_df) + 120),
             template="plotly_dark",
-            paper_bgcolor="#131A22",
-            plot_bgcolor="#131A22",
-            font=dict(color="#E5EDF6", size=13),
+            paper_bgcolor="#000000",
+            plot_bgcolor="#000000",
+            font=dict(color="#E8ECEF", size=12, family="Inter, sans-serif"),
             colorway=PALETTE,
-            xaxis=dict(gridcolor="#1E2A36"),
-            yaxis=dict(gridcolor="#1E2A36"),
+            xaxis=dict(gridcolor="#1E2027", color="#6B7280"),
+            yaxis=dict(gridcolor="#1E2027", color="#6B7280"),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
         if result.skipped:
             with st.expander(f"Skipped tickers ({len(result.skipped)})"):

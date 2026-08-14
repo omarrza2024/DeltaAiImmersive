@@ -15,6 +15,10 @@ class InvestmentGoal:
     max_volatility_pct: float | None = None
     sectors: list[str] = field(default_factory=list)
     max_recommendations: int | None = None
+    # "low" / "medium" / "high" — user's stated risk *label* preference
+    # (separate from the volatility cap). Used to prefer stocks that got
+    # assigned the matching risk bucket by clustering.
+    risk_preference: str | None = None
 
     def is_complete(self) -> bool:
         return (

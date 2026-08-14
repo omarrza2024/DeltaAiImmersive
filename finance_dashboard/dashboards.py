@@ -106,18 +106,21 @@ class PriceMetricsDashboard(BaseDashboard):
         st.plotly_chart(
             fig_price_history(hist, f"{ticker} — price history"),
             use_container_width=True,
+            config={"displayModeBar": False},
         )
 
         cum_pct = (hist / hist.iloc[0] - 1.0) * 100
         st.plotly_chart(
             fig_pct_change(cum_pct, f"{ticker} — cumulative % change"),
             use_container_width=True,
+            config={"displayModeBar": False},
         )
 
         roll = rolling_annualized_volatility(rets)
         st.plotly_chart(
             fig_rolling_vol(roll, f"{ticker} — rolling volatility ({ROLLING_WINDOW}-day)"),
             use_container_width=True,
+            config={"displayModeBar": False},
         )
 
 
@@ -161,6 +164,7 @@ class CompareTwoDashboard(BaseDashboard):
         st.plotly_chart(
             fig_rolling_vol(roll, f"Rolling volatility — {a} vs {b}"),
             use_container_width=True,
+            config={"displayModeBar": False},
         )
         st.plotly_chart(
             fig_volatility_bar(
@@ -169,6 +173,7 @@ class CompareTwoDashboard(BaseDashboard):
                 f"Annualized volatility comparison (daily returns, √{TRADING_DAYS})",
             ),
             use_container_width=True,
+            config={"displayModeBar": False},
         )
 
 
@@ -208,6 +213,6 @@ class CorrelationDashboard(BaseDashboard):
             _kpi("Trading days", f"{len(log_rets):,}"),
             _kpi("Time range", period_label),
         ])
-        st.plotly_chart(fig_correlation_heatmap(corr), use_container_width=True)
+        st.plotly_chart(fig_correlation_heatmap(corr), use_container_width=True, config={"displayModeBar": False})
         with st.expander("Numeric correlation matrix"):
             st.dataframe(corr.round(3), use_container_width=True)

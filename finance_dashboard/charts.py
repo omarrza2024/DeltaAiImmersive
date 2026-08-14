@@ -5,21 +5,50 @@ from __future__ import annotations
 import pandas as pd
 import plotly.graph_objects as go
 
-# Signal Studio palette: teal-first, with warm accents for negatives/losses.
-PALETTE = ["#14B8A6", "#8B5CF6", "#F59E0B", "#EC4899", "#22D3EE", "#F87171"]
-GRID_COLOR = "#1E2A36"
-AXIS_COLOR = "#8A9BA8"
+# Shared plotly config for st.plotly_chart — hides the camera/zoom/pan toolbar.
+CHART_CONFIG = {"displayModeBar": False}
+GRID_COLOR = "#1E2027"
+AXIS_COLOR = "#6B7280"
+BG_COLOR = "#000000"
+FONT_FAMILY = "Inter, -apple-system, Segoe UI, sans-serif"
 
-_LAYOUT = dict(
-    template="plotly_dark",
-    paper_bgcolor="#131A22",
-    plot_bgcolor="#131A22",
-    margin=dict(l=48, r=24, t=52, b=48),
-    font=dict(color="#E5EDF6", size=13),
-    xaxis=dict(gridcolor=GRID_COLOR, zerolinecolor=GRID_COLOR, color=AXIS_COLOR),
-    yaxis=dict(gridcolor=GRID_COLOR, zerolinecolor=GRID_COLOR, color=AXIS_COLOR),
-    colorway=PALETTE,
-)
+# Fallback tints for the 3rd+ series in multi-line charts; first two slots
+# are ALWAYS the user's gain/loss picks so "stock lines are green/red by default".
+_EXTRA_PALETTE = ["#FFB800", "#22D3EE", "#8B5CF6", "#EC4899"]
+
+
+def _stock_colors() -> tuple[str, str]:
+    """User-picked gain / loss colors from the sidebar (with sensible defaults)."""
+    import streamlit as st
+    return (
+        st.session_state.get("gain_color", "#00E676"),
+        st.session_state.get("loss_color", "#FF3B30"),
+    )
+
+
+def palette() -> list[str]:
+    """Chart colorway: gain, loss, then supporting palette."""
+    gain, loss = _stock_colors()
+    return [gain, loss, *_EXTRA_PALETTE]
+
+
+# For backwards compatibility with anything importing PALETTE.
+PALETTE = ["#00E676", "#FF3B30", *_EXTRA_PALETTE]
+
+
+def _layout() -> dict:
+    """Fresh layout dict per render so the colorway reflects the latest picks."""
+    return dict(
+        template="plotly_dark",
+        paper_bgcolor=BG_COLOR,
+        plot_bgcolor=BG_COLOR,
+        margin=dict(l=48, r=24, t=52, b=48),
+        font=dict(color="#E8ECEF", size=12, family=FONT_FAMILY),
+        xaxis=dict(gridcolor=GRID_COLOR, zerolinecolor=GRID_COLOR, color=AXIS_COLOR,
+                   showspikes=True, spikecolor=AXIS_COLOR, spikethickness=1, spikedash="dot"),
+        yaxis=dict(gridcolor=GRID_COLOR, zerolinecolor=GRID_COLOR, color=AXIS_COLOR),
+        colorway=palette(),
+    )
 _LEGEND = dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
 
 
@@ -30,16 +59,29 @@ def _line_figure(
     y_scale: float = 1.0,
     y_format: str = ",.2f",
     height: int = 480,
+    direction_colored: bool = True,
 ) -> go.Figure:
+    gain, loss = _stock_colors()
+    colors = palette()
+    is_single = len(data.columns) == 1
+
     fig = go.Figure()
     for i, col in enumerate(data.columns):
+        series = data[col].dropna()
+        # For a single-line stock chart, color by up/down direction so the line
+        # itself signals "went up = green, went down = red". Multi-line charts
+        # use the palette (gain first, loss second) to keep series distinct.
+        if is_single and direction_colored and len(series) >= 2:
+            color = gain if series.iloc[-1] >= series.iloc[0] else loss
+        else:
+            color = colors[i % len(colors)]
         fig.add_trace(
             go.Scatter(
                 x=data.index,
                 y=data[col] * y_scale,
                 mode="lines",
                 name=col,
-                line=dict(color=PALETTE[i % len(PALETTE)], width=2),
+                line=dict(color=color, width=2),
                 hovertemplate=f"%{{x|%Y-%m-%d}}<br>%{{y:{y_format}}}<extra></extra>",
             )
         )
@@ -50,7 +92,7 @@ def _line_figure(
         hovermode="x unified",
         height=height,
         legend=_LEGEND,
-        **_LAYOUT,
+        **_layout(),
     )
     return fig
 
@@ -83,11 +125,12 @@ def fig_rolling_vol(rolling: pd.DataFrame, title: str) -> go.Figure:
 
 
 def fig_volatility_bar(tickers: list[str], vols_pct: list[float], title: str) -> go.Figure:
+    colors = palette()
     fig = go.Figure(
         data=go.Bar(
             x=tickers,
             y=vols_pct,
-            marker_color=[PALETTE[i % len(PALETTE)] for i in range(len(tickers))],
+            marker_color=[colors[i % len(colors)] for i in range(len(tickers))],
             text=[f"{v:.2f}%" if pd.notna(v) else "—" for v in vols_pct],
             textposition="outside",
         )
@@ -97,12 +140,13 @@ def fig_volatility_bar(tickers: list[str], vols_pct: list[float], title: str) ->
         yaxis_title="Volatility (%)",
         height=360,
         showlegend=False,
-        **_LAYOUT,
+        **_layout(),
     )
     return fig
 
 
 def fig_correlation_heatmap(corr: pd.DataFrame) -> go.Figure:
+    gain, loss = _stock_colors()
     fig = go.Figure(
         data=go.Heatmap(
             z=corr.values,
@@ -110,11 +154,11 @@ def fig_correlation_heatmap(corr: pd.DataFrame) -> go.Figure:
             y=corr.index.tolist(),
             zmin=-1,
             zmax=1,
-            # Custom teal-to-red diverging scale matching the app palette.
+            # Diverging scale: user-picked loss color at −1, gain at +1.
             colorscale=[
-                [0.0, "#F87171"],   # strong negative
-                [0.5, "#131A22"],   # near-zero blends with card bg
-                [1.0, "#14B8A6"],   # strong positive
+                [0.0, loss],
+                [0.5, "#000000"],   # near-zero blends into terminal bg
+                [1.0, gain],
             ],
             zmid=0,
             colorbar=dict(title="ρ", tickcolor=AXIS_COLOR, tickfont=dict(color=AXIS_COLOR)),
@@ -125,8 +169,8 @@ def fig_correlation_heatmap(corr: pd.DataFrame) -> go.Figure:
         title="Return correlation matrix",
         height=max(360, 48 * len(corr)),
         margin=dict(l=80, r=24, t=56, b=80),
-        paper_bgcolor="#131A22",
-        plot_bgcolor="#131A22",
-        font=dict(color="#E5EDF6", size=13),
+        paper_bgcolor=BG_COLOR,
+        plot_bgcolor=BG_COLOR,
+        font=dict(color="#E8ECEF", size=12, family=FONT_FAMILY),
     )
     return fig

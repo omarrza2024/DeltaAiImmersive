@@ -26,8 +26,8 @@ from finance_dashboard.recommender.models import RiskLabel
 _STATE_KEY = "assistant_state"
 _HISTORY_KEY = "assistant_history"  # list of (role, content, recommendations|None)
 
-_USER_AVATAR = "🧑"
-_BOT_AVATAR = "💠"
+_USER_AVATAR = "👤"
+_BOT_AVATAR = "🔷"
 
 _RISK_CHIP_CLASS = {
     RiskLabel.LOW: "chip low",
@@ -49,7 +49,9 @@ def _sparkline_html(ticker: str) -> str | None:
     series = prices[ticker].dropna()
     if series.empty:
         return None
-    color = "#2DD4BF" if series.iloc[-1] >= series.iloc[0] else "#F87171"
+    gain = st.session_state.get("gain_color", "#00E676")
+    loss = st.session_state.get("loss_color", "#FF3B30")
+    color = gain if series.iloc[-1] >= series.iloc[0] else loss
     fig = go.Figure(go.Scatter(x=series.index, y=series.values, mode="lines",
                                line=dict(color=color, width=1.6), hoverinfo="skip"))
     fig.update_layout(
@@ -100,11 +102,19 @@ def _render_card(rank: int, rec: Recommendation) -> None:
         </div>
         """
     )
+    # Unique per-card key so the same ticker rendered across multiple chat
+    # turns doesn't collide on Streamlit's auto-generated element IDs.
+    card_key = f"{ticker}-{id(rec)}"
     with st.container(border=True):
         st.markdown(card_html, unsafe_allow_html=True)
         fig = _sparkline_html(ticker)
         if fig is not None:
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                config={"displayModeBar": False},
+                key=f"spark-{card_key}",
+            )
 
         with st.expander(f"📄 SEC financials — {ticker}"):
             with st.spinner(f"Fetching {ticker} from SEC EDGAR…"):
@@ -140,6 +150,7 @@ def render_assistant_tab() -> None:
     assistant = _init_state()
     _, state = st.session_state[_STATE_KEY]
 
+    # 1) Render every message top-to-bottom (grows upward as history piles on).
     for role, content, reply in st.session_state[_HISTORY_KEY]:
         avatar = _USER_AVATAR if role == "user" else _BOT_AVATAR
         with st.chat_message(role, avatar=avatar):
@@ -147,23 +158,20 @@ def render_assistant_tab() -> None:
             if reply is not None:
                 _render_recommendations(reply)
 
+    # 2) Input pinned at the bottom of the tab, below all history.
     prompt = st.chat_input("Type your answer or ask a follow-up…")
     if not prompt:
         return
 
+    # 3) Handle the turn — append user + AI to history, then rerun so both
+    #    render *above* the input on the next pass.
     st.session_state[_HISTORY_KEY].append(("user", prompt, None))
-    with st.chat_message("user", avatar=_USER_AVATAR):
-        st.markdown(prompt)
-
-    with st.chat_message("assistant", avatar=_BOT_AVATAR):
-        with st.spinner("Thinking…"):
-            try:
-                reply = assistant.handle_message(state, prompt)
-            except LLMUnavailableError as exc:
-                message = f"⚠️ The AI service failed: {exc}. Please try again."
-                st.error(message)
-                st.session_state[_HISTORY_KEY].append(("assistant", message, None))
-                return
-        st.markdown(reply.message)
-        _render_recommendations(reply)
+    with st.spinner("Thinking…"):
+        try:
+            reply = assistant.handle_message(state, prompt)
+        except LLMUnavailableError as exc:
+            message = f"⚠️ The AI service failed: {exc}. Please try again."
+            st.session_state[_HISTORY_KEY].append(("assistant", message, None))
+            st.rerun()
     st.session_state[_HISTORY_KEY].append(("assistant", reply.message, reply))
+    st.rerun()

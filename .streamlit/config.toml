@@ -1,7 +1,7 @@
 [theme]
 base                     = "dark"
-primaryColor             = "#14B8A6"   # teal — accents, focus rings, primary buttons
-backgroundColor          = "#0B0F14"   # near-black canvas
-secondaryBackgroundColor = "#131A22"   # cards, expanders, chat bubbles
-textColor                = "#E5EDF6"   # off-white body text
+primaryColor             = "#3B82F6"   # finance-institution blue
+backgroundColor          = "#000000"   # pure black canvas
+secondaryBackgroundColor = "#0E1015"   # slightly lifted card fill
+textColor                = "#E8ECEF"   # near-white
 font                     = "sans serif"

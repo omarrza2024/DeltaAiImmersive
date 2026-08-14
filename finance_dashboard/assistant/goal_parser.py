@@ -12,7 +12,8 @@ from finance_dashboard.recommender.universe import PREDEFINED_UNIVERSES
 _SYSTEM_PROMPT = f"""You extract structured investment constraints from a user's chat messages.
 Return ONLY a JSON object with exactly these keys:
   target_annual_return_pct  (number, e.g. 10.0 for 10%; null if not mentioned)
-  max_volatility_pct        (number, annualized %; null if not mentioned; map 'low risk' to 15, 'moderate' to 25, 'high' to 45)
+  max_volatility_pct        (number; ONLY extract if the user gives an explicit % — do NOT convert risk words. Also set from a risk word as a safety cap: low=20, medium=35, high=60)
+  risk_preference           (string "low" | "medium" | "high"; ONLY set if the user used a risk word like low/conservative/safe (=low), moderate/medium/balanced (=medium), high/aggressive/growth (=high). null if they gave only a number.)
   sectors                   (array of strings from {sorted(PREDEFINED_UNIVERSES)}; null if not mentioned)
   max_recommendations       (integer; null if not mentioned)
 
@@ -67,4 +68,7 @@ class GoalParser:
             goal.max_volatility_pct = float(data["max_volatility_pct"])
         if data.get("max_recommendations") is not None:
             goal.max_recommendations = int(data["max_recommendations"])
+        pref = data.get("risk_preference")
+        if pref in ("low", "medium", "high"):
+            goal.risk_preference = pref
         return goal

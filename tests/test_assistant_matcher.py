@@ -71,6 +71,26 @@ def test_return_above_target_does_not_penalize():
     assert exceeds >= on_target
 
 
+def test_risk_preference_medium_beats_low_when_all_else_equal():
+    """Regression: user says 'moderate' -> Medium-Risk stocks must outrank Low-Risk ones."""
+    goal = base_goal(max_volatility_pct=40.0, target_annual_return_pct=10.0)
+    goal.risk_preference = "medium"
+    low_stock  = stock("SAFE", vol=0.20, ret=0.15, label=RiskLabel.LOW)
+    med_stock  = stock("MOD",  vol=0.20, ret=0.15, label=RiskLabel.MEDIUM)
+    assert score_match(med_stock, goal) > score_match(low_stock, goal)
+
+
+def test_risk_preference_high_matches_both_high_variants():
+    goal = base_goal(max_volatility_pct=60.0, target_annual_return_pct=10.0)
+    goal.risk_preference = "high"
+    winner = stock("W", vol=0.40, ret=0.15, label=RiskLabel.HIGH_POSITIVE)
+    loser  = stock("L", vol=0.40, ret=0.15, label=RiskLabel.HIGH_NEGATIVE)
+    medium = stock("M", vol=0.40, ret=0.15, label=RiskLabel.MEDIUM)
+    # Both High-* variants match the preference; MEDIUM gets penalized.
+    assert score_match(winner, goal) > score_match(medium, goal)
+    assert score_match(loser,  goal) > score_match(medium, goal)
+
+
 def test_missing_features_score_zero_not_crash():
     goal = base_goal()
     empty = StockRecommendation(

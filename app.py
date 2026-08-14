@@ -48,16 +48,31 @@ _STRATEGY_LABELS: dict[str, str] = {
 _RECOMMENDER_PERIODS = ["1 month", "1 year", "5 years"]
 
 
-def _render_sidebar_defaults() -> str:
-    """Sidebar holds shared defaults only; dashboards live in tabs."""
+def _render_sidebar_defaults() -> tuple[str, str, str]:
+    """Sidebar holds shared defaults + stock-color pickers."""
     with st.sidebar:
         st.subheader("Defaults")
-        return st.selectbox(
+        period = st.selectbox(
             "Default time range",
             list(PERIOD_OPTIONS.keys()),
             index=period_index(DEFAULT_PERIOD_LABEL, list(PERIOD_OPTIONS.keys())),
             key="default_period",
         )
+        st.subheader("Stock colors")
+        c1, c2 = st.columns(2)
+        gain = c1.color_picker(
+            "Gain",
+            value=st.session_state.get("gain_color", "#00E676"),
+            key="gain_color",
+            help="Used for positive returns, up-moves, and Low-Risk labels.",
+        )
+        loss = c2.color_picker(
+            "Loss",
+            value=st.session_state.get("loss_color", "#FF3B30"),
+            key="loss_color",
+            help="Used for negative returns, down-moves, and High-Risk-Negative labels.",
+        )
+    return period, gain, loss
 
 
 def _render_price_inputs(default_period: str) -> tuple[list[str], str]:
@@ -154,7 +169,7 @@ def _render_recommender_tab(controller: VisualizationController, default_period:
 
 def main() -> None:
     st.set_page_config(
-        page_title="Finance Dashboard",
+        page_title="TradeMatrix",
         page_icon="📈",
         layout="wide",
         initial_sidebar_state="expanded",
@@ -162,78 +177,256 @@ def main() -> None:
     st.markdown(
         """
         <style>
-        .block-container { padding-top: 1.5rem; max-width: 1200px; }
-        h1, h2, h3 { letter-spacing: -0.02em; font-weight: 600; }
-        h1 { font-size: 2.15rem; margin-bottom: 0.15rem; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-        /* Tab bar: cleaner, teal underline instead of Streamlit red. */
-        .stTabs [data-baseweb="tab-list"] { gap: 1.5rem; border-bottom: 1px solid #1E2A36; }
-        .stTabs [data-baseweb="tab"] { padding: 0.5rem 0.25rem; font-weight: 500; }
-        .stTabs [aria-selected="true"] { color: #14B8A6 !important; }
+        /* === FINANCE TYPOGRAPHY === Inter everywhere, tabular-nums on data. */
+        html, body, [class*="css"], .stApp, .stMarkdown, .stTextInput, .stSelectbox,
+        .stMultiSelect, .stDataFrame, .stChatInput, .stButton, .stExpander {
+            font-family: "Inter", -apple-system, "Segoe UI", sans-serif !important;
+            font-size: 14px !important;
+        }
+        .stApp { background: #000000; color: #E8ECEF; font-feature-settings: "ss01", "cv11"; }
 
-        /* Selectboxes: plain dropdown feel — pointer cursor, no caret, no typing.
-           Multiselects keep typing enabled so autocomplete/search works. */
-        div[data-baseweb="select"],
-        div[data-baseweb="select"] * { cursor: pointer !important; }
-        .stSelectbox div[data-baseweb="select"] input {
-            caret-color: transparent !important;
-            pointer-events: none !important;
+        /* Tabular figures on any numeric surface — clean alignment without a coding feel. */
+        .number, .ticker, .kpi-value, .rec-ticker, .match-bar .val,
+        .stDataFrame [role="gridcell"], .stDataFrame [role="columnheader"] {
+            font-variant-numeric: tabular-nums;
         }
 
-        /* Stock header (used by Prices / Compare tabs). */
-        .stock-header { display:flex; align-items:baseline; gap:0.6rem; margin:0.25rem 0 0; }
-        .stock-ticker { font-size:1.35rem; font-weight:700; letter-spacing:-0.01em; color:#E5EDF6; }
-        .stock-name   { color:#8A9BA8; font-size:0.9rem; }
-        .stock-sub    { color:#8A9BA8; font-size:0.78rem; margin:0.1rem 0 0.75rem; }
+        /* === TERMINAL HEADER === */
+        .block-container { padding-top: 3rem; padding-bottom: 3rem; max-width: 1400px; }
+        .term-header {
+            display:flex; align-items:baseline; justify-content:space-between;
+            padding:0.55rem 0.95rem; margin:0 0 1rem;
+            background:linear-gradient(90deg,#0E1015 0%,#000 100%);
+            border:1px solid #1E2027; border-left:3px solid var(--accent, #3B82F6);
+        }
+        .term-title {
+            font-family:"Inter", sans-serif !important;
+            font-size:1.15rem; font-weight:800; letter-spacing:0.18em;
+            color:#E8ECEF; text-transform:uppercase;
+        }
+        .term-title span.slash { color:var(--accent, #3B82F6); font-weight:600; }
+        .term-meta {
+            font-family:"Inter", sans-serif !important;
+            font-size:0.72rem; color:#6B7280; letter-spacing:0.1em; text-transform:uppercase;
+        }
+        .term-meta span.dot { color:#22C55E; margin-right:0.3rem; }
 
-        /* KPI row shared across all tabs. */
-        .kpi-row      { display:flex; flex-wrap:wrap; gap:0.6rem; margin:0.25rem 0 1rem; }
-        .kpi          { flex:1 1 130px; padding:0.6rem 0.85rem; background:#131A22;
-                        border:1px solid #1E2A36; border-radius:10px; min-width:120px; }
-        .kpi-label    { color:#8A9BA8; font-size:0.72rem; text-transform:uppercase;
-                        letter-spacing:0.06em; font-weight:600; }
-        .kpi-value    { color:#E5EDF6; font-size:1.4rem; font-weight:600;
-                        letter-spacing:-0.01em; margin-top:0.15rem; }
-        .kpi.pos .kpi-value  { color:#2DD4BF; }
-        .kpi.neg .kpi-value  { color:#F87171; }
-        .kpi.low .kpi-value  { color:#4ADE80; }
-        .kpi.med .kpi-value  { color:#FBBF24; }
-        .kpi.high .kpi-value { color:#F87171; }
+        /* === TABS: terminal-style bracketed labels === */
+        .stTabs [data-baseweb="tab-list"] {
+            gap:0; border-bottom:1px solid #1E2027; background:transparent;
+        }
+        .stTabs [data-baseweb="tab"] {
+            padding:0.55rem 1.1rem !important;
+            font-family:"Inter", sans-serif !important;
+            font-size:0.72rem !important;
+            font-weight:600 !important;
+            letter-spacing:0.12em !important;
+            text-transform:uppercase !important;
+            color:#6B7280 !important;
+            border-right:1px solid #1E2027;
+            background:transparent;
+        }
+        .stTabs [data-baseweb="tab"]:hover { color:#E8ECEF !important; background:#0E1015; }
+        .stTabs [aria-selected="true"] {
+            color:var(--accent, #3B82F6) !important;
+            background:#0E1015 !important;
+            border-top:2px solid var(--accent, #3B82F6) !important;
+            padding-top:calc(0.55rem - 2px) !important;
+        }
+        .stTabs [data-baseweb="tab-highlight"] { display:none !important; }
 
-        /* Recommendation card look & chips. */
+        /* === HEADINGS === */
+        h1, h2, h3, h4 {
+            font-family:"Inter", sans-serif !important;
+            font-weight:600 !important;
+            letter-spacing:-0.01em !important;
+        }
+        h2 { font-size:1.1rem !important; text-transform:uppercase; letter-spacing:0.08em !important;
+             color:#E8ECEF; border-bottom:1px solid #1E2027; padding-bottom:0.4rem;
+             margin-top:1.5rem !important; }
+
+        /* === INPUTS: softer, more product-like === */
+        .stTextInput input, .stTextArea textarea {
+            background:#0E1015 !important; border:1px solid #262A33 !important;
+            border-radius:8px !important; color:#E8ECEF !important;
+            padding:0.55rem 0.75rem !important;
+            font-size:14px !important;
+        }
+        div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
+            background:#0E1015 !important; border:1px solid #262A33 !important;
+            border-radius:8px !important; color:#E8ECEF !important;
+            font-size:14px !important;
+        }
+        .stTextInput input:focus, div[data-baseweb="select"]:focus-within > div,
+        .stTextArea textarea:focus {
+            border-color:var(--accent, #3B82F6) !important;
+            box-shadow:0 0 0 3px color-mix(in srgb, var(--accent, #3B82F6) 20%, transparent) !important;
+            outline:none !important;
+        }
+
+        /* Selectbox: no-typing behavior kept. */
+        div[data-baseweb="select"], div[data-baseweb="select"] * { cursor: pointer !important; }
+        .stSelectbox div[data-baseweb="select"] input {
+            caret-color: transparent !important; pointer-events: none !important;
+        }
+
+        /* Multiselect chips: amber tinted. */
+        div[data-baseweb="select"] [data-baseweb="tag"] {
+            background:color-mix(in srgb, var(--accent, #3B82F6) 16%, transparent) !important;
+            color:#93C5FD !important;
+            border:1px solid color-mix(in srgb, var(--accent, #3B82F6) 30%, transparent) !important;
+            border-radius:2px !important;
+            font-family:"Inter", sans-serif !important;
+            font-size:0.72rem !important; font-weight:600 !important;
+            letter-spacing:0.05em !important; text-transform:uppercase;
+        }
+
+        /* === BUTTONS: filled, product-app feel === */
+        .stButton > button, .stFormSubmitButton > button {
+            background:var(--accent, #3B82F6) !important;
+            color:#FFFFFF !important;
+            border:1px solid var(--accent, #3B82F6) !important;
+            border-radius:8px !important;
+            font-family:"Inter", sans-serif !important;
+            font-size:0.85rem !important; font-weight:600 !important;
+            letter-spacing:0.01em !important; text-transform:none !important;
+            padding:0.5rem 1.2rem !important;
+            transition:filter 120ms ease;
+        }
+        .stButton > button:hover, .stFormSubmitButton > button:hover {
+            filter:brightness(1.1) !important;
+        }
+
+        /* === CONTAINERS: sharp corners, dark card === */
+        [data-testid="stForm"], .st-emotion-cache-r421ms {
+            background:#0A0C10 !important;
+            border:1px solid #1E2027 !important;
+            border-radius:2px !important;
+        }
+        [data-testid="stExpander"] {
+            border:1px solid #1E2027 !important;
+            border-radius:2px !important;
+            background:#0A0C10 !important;
+        }
+
+        /* === KPI TILES: dense terminal readout === */
+        .kpi-row { display:flex; flex-wrap:wrap; gap:0; margin:0.5rem 0 1rem;
+                   border:1px solid #1E2027; }
+        .kpi { flex:1 1 140px; padding:0.65rem 0.9rem; min-width:120px;
+               background:#0A0C10; border-right:1px solid #1E2027; }
+        .kpi:last-child { border-right:none; }
+        .kpi-label { color:#6B7280; font-size:0.65rem; text-transform:uppercase;
+                     letter-spacing:0.14em; font-weight:600;
+                     font-family:"Inter", sans-serif; }
+        .kpi-value { color:#E8ECEF; font-size:1.35rem; font-weight:600;
+                     margin-top:0.2rem; letter-spacing:-0.01em; }
+        .kpi.pos .kpi-value  { color:var(--gain, #00E676); }
+        .kpi.neg .kpi-value  { color:var(--loss, #FF3B30); }
+        .kpi.low .kpi-value  { color:var(--gain, #00E676); }
+        .kpi.med .kpi-value  { color:#FFB800; }
+        .kpi.high .kpi-value { color:var(--loss, #FF3B30); }
+
+        /* === STOCK HEADER === */
+        .stock-header { display:flex; align-items:baseline; gap:0.7rem; margin:0.5rem 0 0;
+                        padding-bottom:0.35rem; border-bottom:1px solid #1E2027; }
+        .stock-ticker { font-size:1.5rem; font-weight:700; color:var(--accent, #3B82F6);
+                        font-family:"Inter", sans-serif; letter-spacing:0.03em; }
+        .stock-name   { color:#9AA3AD; font-size:0.85rem; font-weight:500; }
+        .stock-sub    { color:#6B7280; font-size:0.7rem; letter-spacing:0.1em;
+                        text-transform:uppercase; margin:0.35rem 0 0.5rem;
+                        font-family:"Inter", sans-serif; }
+
+        /* === RECOMMENDATION CARDS === */
         .rec-card { padding: 0.25rem 0.25rem 0 0.25rem; }
-        .rec-header { display:flex; align-items:baseline; gap:0.6rem; margin-bottom:0.25rem; }
-        .rec-ticker { font-size:1.35rem; font-weight:700; letter-spacing:-0.01em; }
-        .rec-name   { color:#8A9BA8; font-size:0.9rem; }
-        .rec-rank   { background:#14B8A6; color:#0B0F14; font-weight:700;
-                      padding:0.1rem 0.55rem; border-radius:999px; font-size:0.75rem;
-                      letter-spacing:0.03em; }
-        .chip-row   { display:flex; flex-wrap:wrap; gap:0.4rem; margin:0.35rem 0 0.5rem; }
-        .chip       { padding:0.15rem 0.6rem; border-radius:6px; font-size:0.8rem;
-                      font-weight:500; background:#1B2530; color:#CBD5DE; }
-        .chip.pos   { background:rgba(20,184,166,0.16); color:#2DD4BF; }
-        .chip.neg   { background:rgba(239,68,68,0.16);  color:#F87171; }
-        .chip.low   { background:rgba(34,197,94,0.16);  color:#4ADE80; }
-        .chip.med   { background:rgba(234,179,8,0.16);  color:#FBBF24; }
-        .chip.high  { background:rgba(239,68,68,0.16);  color:#F87171; }
+        .rec-header { display:flex; align-items:baseline; gap:0.7rem; margin-bottom:0.3rem;
+                      padding-bottom:0.3rem; border-bottom:1px solid #1E2027; }
+        .rec-ticker { font-size:1.35rem; font-weight:700; color:var(--accent, #3B82F6);
+                      letter-spacing:0.03em; font-family:"Inter", sans-serif; }
+        .rec-name   { color:#9AA3AD; font-size:0.85rem; }
+        .rec-rank   { background:var(--accent, #3B82F6); color:#000; font-weight:700;
+                      padding:0.15rem 0.55rem; border-radius:2px; font-size:0.65rem;
+                      letter-spacing:0.15em; font-family:"Inter", sans-serif; }
+        .chip-row   { display:flex; flex-wrap:wrap; gap:0.4rem; margin:0.4rem 0 0.5rem; }
+        .chip       { padding:0.2rem 0.55rem; border-radius:2px; font-size:0.7rem;
+                      font-weight:600; background:#151820; color:#B8C0C8;
+                      border:1px solid #1E2027; letter-spacing:0.05em;
+                      font-family:"Inter", sans-serif; text-transform:uppercase; }
+        .chip.pos   { background:color-mix(in srgb, var(--gain, #00E676) 12%, transparent); color:var(--gain, #00E676); border-color:color-mix(in srgb, var(--gain, #00E676) 30%, transparent); }
+        .chip.neg   { background:color-mix(in srgb, var(--loss, #FF3B30) 12%, transparent); color:var(--loss, #FF3B30); border-color:color-mix(in srgb, var(--loss, #FF3B30) 30%, transparent); }
+        .chip.low   { background:color-mix(in srgb, var(--gain, #00E676) 12%, transparent); color:var(--gain, #00E676); border-color:color-mix(in srgb, var(--gain, #00E676) 30%, transparent); }
+        .chip.med   { background:rgba(255,184,0,0.1); color:#FFB800; border-color:rgba(255,184,0,0.3); }
+        .chip.high  { background:color-mix(in srgb, var(--loss, #FF3B30) 12%, transparent); color:var(--loss, #FF3B30); border-color:color-mix(in srgb, var(--loss, #FF3B30) 30%, transparent); }
 
-        /* Match-score bar. */
-        .match-bar { display:flex; align-items:center; gap:0.6rem; margin:0.15rem 0 0.35rem; }
-        .match-bar .label { font-size:0.78rem; color:#8A9BA8; min-width:75px; }
-        .match-bar .track { flex:1; height:6px; background:#1B2530; border-radius:3px;
-                            overflow:hidden; }
-        .match-bar .fill  { height:100%; background:linear-gradient(90deg,#14B8A6,#2DD4BF);
-                            border-radius:3px; }
-        .match-bar .val   { font-size:0.85rem; color:#E5EDF6; font-weight:600;
-                            min-width:38px; text-align:right; }
+        /* Match-score bar — sharper */
+        .match-bar { display:flex; align-items:center; gap:0.6rem; margin:0.25rem 0 0.4rem; }
+        .match-bar .label { font-size:0.65rem; color:#6B7280; min-width:85px;
+                            letter-spacing:0.1em; text-transform:uppercase;
+                            font-family:"Inter", sans-serif; font-weight:600; }
+        .match-bar .track { flex:1; height:4px; background:#151820; border-radius:0;
+                            border:1px solid #1E2027; overflow:hidden; }
+        .match-bar .fill  { height:100%; background:var(--accent, #3B82F6); }
+        .match-bar .val   { font-size:0.9rem; color:#E8ECEF; font-weight:700;
+                            min-width:38px; text-align:right;
+                            font-family:"Inter", sans-serif; }
+
+        /* === DATAFRAMES === */
+        .stDataFrame { border:1px solid #1E2027; border-radius:2px; }
+        .stDataFrame [role="columnheader"] {
+            background:#0A0C10 !important; color:#6B7280 !important;
+            font-size:0.65rem !important; letter-spacing:0.1em !important;
+            text-transform:uppercase !important; font-weight:600 !important;
+        }
+
+        /* === CHAT === */
+        /* === CHAT: Claude/ChatGPT-style — AI unboxed, user in a subtle card. === */
+        [data-testid="stChatMessage"] {
+            background:transparent !important;
+            border:none !important;
+            padding:0.4rem 0 !important;
+            margin-bottom:1rem !important;
+            gap:0.9rem !important;
+        }
+        /* User bubble: subtle contrast — clearly a "you said" card. */
+        [data-testid="stChatMessage"]:has([aria-label="Chat message from user"]) {
+            background:#151A22 !important;
+            border:1px solid #262A33 !important;
+            border-radius:14px !important;
+            padding:0.9rem 1.15rem !important;
+        }
+        /* AI message: prose flows freely — no card, more breathing room. */
+        [data-testid="stChatMessage"]:has([aria-label="Chat message from assistant"]) [data-testid="stMarkdownContainer"] p {
+            line-height:1.6 !important;
+            margin-bottom:0.6rem !important;
+        }
+
+        [data-testid="stChatInput"] textarea {
+            background:#0E1015 !important; border:1px solid #262A33 !important;
+            border-radius:12px !important; padding:0.75rem 0.95rem !important;
+            font-size:14px !important;
+        }
+        [data-testid="stChatInput"] textarea:focus {
+            border-color:#3B82F6 !important;
+            box-shadow:0 0 0 3px color-mix(in srgb, #3B82F6 20%, transparent) !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    st.markdown("# 📈 Signal Studio")
-    st.caption("Explore, screen, and reason about equities — powered by live market data, SEC filings, and an AI advisor.")
+    st.markdown(
+        '<div class="term-header">'
+        '<span class="term-title">TRADE<span class="slash">MATRIX</span></span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-    default_period = _render_sidebar_defaults()
+    default_period, gain, loss = _render_sidebar_defaults()
+    # Inject the user-picked gain/loss colors as CSS variables — all styles read them.
+    st.markdown(
+        f"<style>:root {{ --gain: {gain}; --loss: {loss}; }}</style>",
+        unsafe_allow_html=True,
+    )
     controller = VisualizationController()
 
     tab_price, tab_compare, tab_corr, tab_recommend, tab_assistant = st.tabs(
