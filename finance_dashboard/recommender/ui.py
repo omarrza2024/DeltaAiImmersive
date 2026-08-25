@@ -16,14 +16,12 @@ from finance_dashboard.recommender.models import RecommendationRequest, RiskLabe
 from finance_dashboard.recommender.recommender import StockRecommender
 
 def _label_colors() -> dict[str, str]:
-    """Chart color per risk label — Low/HighNegative follow the user's gain/loss picks."""
-    gain = st.session_state.get("gain_color", "#00E676")
-    loss = st.session_state.get("loss_color", "#FF3B30")
+    """Chart color per risk label — Low/HighNegative are semantic and always fixed."""
     return {
-        RiskLabel.LOW.value:            gain,
+        RiskLabel.LOW.value:            "#00E676",   # green (safe/gain-like)
         RiskLabel.MEDIUM.value:         "#FFB800",
         RiskLabel.HIGH_POSITIVE.value:  "#3B82F6",
-        RiskLabel.HIGH_NEGATIVE.value:  loss,
+        RiskLabel.HIGH_NEGATIVE.value:  "#FF3B30",   # red (loss-like)
     }
 
 # Per-bucket theme for the KPI chips at the top.

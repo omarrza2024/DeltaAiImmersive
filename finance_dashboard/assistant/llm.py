@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Callable
 
-MODEL = "llama-3.3-70b-versatile"
+MODEL = "openai/gpt-oss-120b"
 
 ChatCompletion = Callable[..., str]  # (system, messages, *, json_mode) -> content
 

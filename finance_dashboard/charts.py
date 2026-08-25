@@ -12,28 +12,33 @@ AXIS_COLOR = "#6B7280"
 BG_COLOR = "#000000"
 FONT_FAMILY = "Inter, -apple-system, Segoe UI, sans-serif"
 
-# Fallback tints for the 3rd+ series in multi-line charts; first two slots
-# are ALWAYS the user's gain/loss picks so "stock lines are green/red by default".
+# Hardcoded semantic colors — gain/loss NEVER depend on user picks so
+# green-means-up / red-means-down stays consistent everywhere.
+GAIN_COLOR = "#00E676"
+LOSS_COLOR = "#FF3B30"
+
+# Fallback tints for the 3rd+ series in multi-line charts; the first two
+# slots come from the user's Chart-color pickers (comparison colors).
 _EXTRA_PALETTE = ["#FFB800", "#22D3EE", "#8B5CF6", "#EC4899"]
 
 
-def _stock_colors() -> tuple[str, str]:
-    """User-picked gain / loss colors from the sidebar (with sensible defaults)."""
+def _comparison_colors() -> tuple[str, str]:
+    """User-picked Color 1 / Color 2 for multi-series comparison charts."""
     import streamlit as st
     return (
-        st.session_state.get("gain_color", "#00E676"),
-        st.session_state.get("loss_color", "#FF3B30"),
+        st.session_state.get("gain_color", "#3B82F6"),
+        st.session_state.get("loss_color", "#8B5CF6"),
     )
 
 
 def palette() -> list[str]:
-    """Chart colorway: gain, loss, then supporting palette."""
-    gain, loss = _stock_colors()
-    return [gain, loss, *_EXTRA_PALETTE]
+    """Chart colorway for multi-series comparisons: Color 1, Color 2, then extras."""
+    c1, c2 = _comparison_colors()
+    return [c1, c2, *_EXTRA_PALETTE]
 
 
 # For backwards compatibility with anything importing PALETTE.
-PALETTE = ["#00E676", "#FF3B30", *_EXTRA_PALETTE]
+PALETTE = ["#3B82F6", "#8B5CF6", *_EXTRA_PALETTE]
 
 
 def _layout() -> dict:
@@ -61,7 +66,6 @@ def _line_figure(
     height: int = 480,
     direction_colored: bool = True,
 ) -> go.Figure:
-    gain, loss = _stock_colors()
     colors = palette()
     is_single = len(data.columns) == 1
 
@@ -69,10 +73,10 @@ def _line_figure(
     for i, col in enumerate(data.columns):
         series = data[col].dropna()
         # For a single-line stock chart, color by up/down direction so the line
-        # itself signals "went up = green, went down = red". Multi-line charts
-        # use the palette (gain first, loss second) to keep series distinct.
+        # itself signals "went up = green, went down = red" — these ALWAYS use
+        # the fixed gain/loss colors regardless of the user's picker choices.
         if is_single and direction_colored and len(series) >= 2:
-            color = gain if series.iloc[-1] >= series.iloc[0] else loss
+            color = GAIN_COLOR if series.iloc[-1] >= series.iloc[0] else LOSS_COLOR
         else:
             color = colors[i % len(colors)]
         fig.add_trace(
@@ -146,7 +150,6 @@ def fig_volatility_bar(tickers: list[str], vols_pct: list[float], title: str) ->
 
 
 def fig_correlation_heatmap(corr: pd.DataFrame) -> go.Figure:
-    gain, loss = _stock_colors()
     fig = go.Figure(
         data=go.Heatmap(
             z=corr.values,
@@ -154,11 +157,11 @@ def fig_correlation_heatmap(corr: pd.DataFrame) -> go.Figure:
             y=corr.index.tolist(),
             zmin=-1,
             zmax=1,
-            # Diverging scale: user-picked loss color at −1, gain at +1.
+            # Diverging scale — always red at −1, green at +1 (semantic).
             colorscale=[
-                [0.0, loss],
+                [0.0, LOSS_COLOR],
                 [0.5, "#000000"],   # near-zero blends into terminal bg
-                [1.0, gain],
+                [1.0, GAIN_COLOR],
             ],
             zmid=0,
             colorbar=dict(title="ρ", tickcolor=AXIS_COLOR, tickfont=dict(color=AXIS_COLOR)),

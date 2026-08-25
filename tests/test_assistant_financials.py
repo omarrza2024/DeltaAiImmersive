@@ -98,6 +98,34 @@ def test_render_handles_missing_optional_fields():
     assert "FOO" in md
 
 
+def test_summary_produces_compact_llm_block_from_memo(monkeypatch):
+    """`financials_summary()` turns a memo into a plain-text block LLM can read."""
+    import finance_dashboard.assistant.financials as fin
+
+    monkeypatch.setattr(fin, "fetch_company_memo", lambda ticker: sample_memo())
+    block = fin.financials_summary("AAPL")
+
+    assert "Apple Inc." in block and "AAPL" in block
+    assert "Revenue" in block and "Net Income" in block
+    assert "$383,285" in block or "$383.3" in block  # numeric formatting sane
+    # Compact — should not be a full markdown memo.
+    assert "|" not in block or block.count("|") < 6  # allow inline separators, no big tables
+    assert len(block.splitlines()) < 25
+
+
+def test_summary_gracefully_handles_missing_sec_data(monkeypatch):
+    """When the fetch fails, the summary must return a short usable note, not raise."""
+    import finance_dashboard.assistant.financials as fin
+
+    def failing(ticker):
+        raise fin.FinancialsUnavailableError("no filings")
+
+    monkeypatch.setattr(fin, "fetch_company_memo", failing)
+    block = fin.financials_summary("FOO")
+    assert "FOO" in block
+    assert "no filings" in block.lower() or "unavailable" in block.lower()
+
+
 def test_fetch_raises_clear_error_when_identity_missing(monkeypatch):
     """Regression: without SEC_IDENTITY the library refuses; we must surface that plainly."""
     import finance_dashboard.assistant.financials as fin

@@ -20,6 +20,9 @@ from finance_dashboard.assistant.financials import (
 )
 from finance_dashboard.assistant.llm import get_api_key
 from finance_dashboard.assistant.models import Recommendation
+from finance_dashboard.auth import chats
+from finance_dashboard.auth.db import get_db
+from finance_dashboard.auth.ui import current_user, ensure_chat
 from finance_dashboard.data import company_name, fetch_history
 from finance_dashboard.recommender.models import RiskLabel
 
@@ -49,9 +52,8 @@ def _sparkline_html(ticker: str) -> str | None:
     series = prices[ticker].dropna()
     if series.empty:
         return None
-    gain = st.session_state.get("gain_color", "#00E676")
-    loss = st.session_state.get("loss_color", "#FF3B30")
-    color = gain if series.iloc[-1] >= series.iloc[0] else loss
+    # Sparkline direction is semantic (up = green, down = red) — always fixed.
+    color = "#00E676" if series.iloc[-1] >= series.iloc[0] else "#FF3B30"
     fig = go.Figure(go.Scatter(x=series.index, y=series.values, mode="lines",
                                line=dict(color=color, width=1.6), hoverinfo="skip"))
     fig.update_layout(
@@ -71,12 +73,16 @@ def _cached_memo_markdown(ticker: str) -> str:
 def _init_state() -> InvestmentAssistant:
     if _STATE_KEY not in st.session_state:
         assistant = InvestmentAssistant()
-        st.session_state[_STATE_KEY] = (assistant, assistant.new_state())
+        state = assistant.new_state()
+        state.username = current_user() or ""
+        st.session_state[_STATE_KEY] = (assistant, state)
         st.session_state[_HISTORY_KEY] = [
             (
                 "assistant",
-                "Hi — I'll help you find stocks that fit your goals. "
-                "What annual return are you targeting (e.g. 8%, 12%)?",
+                "Hey! I'm here to help you figure out what fits your investing style — "
+                "no jargon, no rush. What are you hoping to get out of this? "
+                "Growing your money for the long haul, saving for something specific, "
+                "or just curious to see what's out there?",
                 None,
             )
         ]
@@ -163,15 +169,51 @@ def render_assistant_tab() -> None:
     if not prompt:
         return
 
-    # 3) Handle the turn — append user + AI to history, then rerun so both
-    #    render *above* the input on the next pass.
+    # 3) Handle the turn:
+    #    a) Render the user's message and a "typing…" bubble *right now* so
+    #       there's no dead air while Groq responds.
+    #    b) Persist user message.
+    #    c) Call the LLM.
+    #    d) Clear the typing bubble, persist assistant reply, then rerun so
+    #       the full history re-renders cleanly above the input.
+    with st.chat_message("user", avatar=_USER_AVATAR):
+        st.markdown(prompt)
+    typing_placeholder = st.empty()
+    with typing_placeholder.container():
+        with st.chat_message("assistant", avatar=_BOT_AVATAR):
+            st.markdown(
+                '<div class="typing-indicator"><span></span><span></span><span></span></div>',
+                unsafe_allow_html=True,
+            )
+
     st.session_state[_HISTORY_KEY].append(("user", prompt, None))
-    with st.spinner("Thinking…"):
+    db = get_db()
+    username = current_user()
+    chat_id = ensure_chat(db, username, first_message=prompt) if (db is not None and username) else None
+    if db is not None and username and chat_id is not None:
         try:
-            reply = assistant.handle_message(state, prompt)
-        except LLMUnavailableError as exc:
-            message = f"⚠️ The AI service failed: {exc}. Please try again."
-            st.session_state[_HISTORY_KEY].append(("assistant", message, None))
-            st.rerun()
+            chats.append_message(db, username, chat_id, role="user", content=prompt)
+        except Exception:
+            pass  # persistence failure must not break the chat itself
+
+    try:
+        reply = assistant.handle_message(state, prompt)
+    except LLMUnavailableError as exc:
+        typing_placeholder.empty()
+        message = f"⚠️ The AI service failed: {exc}. Please try again."
+        st.session_state[_HISTORY_KEY].append(("assistant", message, None))
+        if db is not None and username and chat_id is not None:
+            try:
+                chats.append_message(db, username, chat_id, role="assistant", content=message)
+            except Exception:
+                pass
+        st.rerun()
+
+    typing_placeholder.empty()
     st.session_state[_HISTORY_KEY].append(("assistant", reply.message, reply))
+    if db is not None and username and chat_id is not None:
+        try:
+            chats.append_message(db, username, chat_id, role="assistant", content=reply.message)
+        except Exception:
+            pass
     st.rerun()

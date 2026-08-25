@@ -4,10 +4,40 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
+from finance_dashboard.assistant.financials import financials_summary
 from finance_dashboard.assistant.goal_parser import GoalParser, next_missing_question
 from finance_dashboard.assistant.llm import ChatCompletion, groq_chat_completion
 from finance_dashboard.assistant.matcher import score_match
 from finance_dashboard.assistant.models import InvestmentGoal, Recommendation
+
+
+def get_portfolio_summary(username: str) -> str:
+    """Return a compact plain-text portfolio summary for the LLM's context.
+
+    Best-effort — returns empty string if Mongo isn't configured, the user isn't
+    signed in, or the user's portfolio is empty/unavailable.
+    """
+    if not username:
+        return ""
+    try:
+        from finance_dashboard.auth.db import get_db
+        from finance_dashboard.portfolio import analytics, store
+        db = get_db()
+        if db is None:
+            return ""
+        portfolio = store.get_or_create(db, username)
+        if not portfolio.get("positions"):
+            return ""
+        # Lazy-import price/sector lookups to avoid Streamlit-context requirements
+        # when this helper is called from tests without streamlit initialised.
+        from finance_dashboard.portfolio.ui import _current_price, _sector
+        positions = portfolio["positions"]
+        prices = {p["ticker"]: _current_price(p["ticker"]) for p in positions}
+        sectors = {p["ticker"]: _sector(p["ticker"]) for p in positions}
+        enriched = analytics.enrich(positions, prices, sectors)
+        return analytics.summary_for_llm(enriched)
+    except Exception:
+        return ""
 from finance_dashboard.models import UserInputError
 from finance_dashboard.recommender.models import (
     FeatureName,
@@ -17,6 +47,37 @@ from finance_dashboard.recommender.models import (
 from finance_dashboard.recommender.recommender import StockRecommender
 
 DISCLAIMER = "Historical data does not guarantee future returns."
+
+_GATHERING_SYSTEM = """You are the user's warm, personable financial advisor — think
+"knowledgeable friend who happens to help with investing," NOT a survey robot. Your job on
+this turn is to acknowledge what the user just said and, if you still need info to build
+their portfolio, ask for it naturally.
+
+You will be given:
+- The full recent chat
+- A brief summary of what you already know about their goals
+- What's still missing to make solid recommendations
+
+Rules for THIS response:
+- Acknowledge what they told you (validate, don't parrot). E.g., "10% is a reasonable target"
+  or "Tech is a fun space to be in right now" — a short human beat.
+- If they asked YOU a question, answer briefly BEFORE steering to the next thing you need.
+- If their constraint is unrealistic (e.g. "20% return with zero risk", "get me rich next
+  month"), push back gently and honestly — set expectations without being preachy.
+- Then, in ONE natural sentence, ask about whatever piece is missing next. Don't list all
+  the missing fields. Don't say "next question is". Don't sound like a form.
+- Warm but efficient: 1-3 sentences total. Use conjunctions, contractions, occasional "we".
+- Do NOT invent numbers. Do NOT re-list past choices. Do NOT thank them for "sharing".
+
+CRITICAL — you are NOT allowed to:
+- Name any specific stock, ticker, ETF, fund, or bond (no "VHT", "JNJ", "healthcare ETF",
+  "blue-chip pharma", "dividend fund", etc.). Recommendations come from a separate
+  calculation engine AFTER we have enough info. If the user is pushing for picks right now,
+  briefly confirm the last missing detail so we can run the engine.
+- Suggest categories that sound like recommendations ("consider a bond fund", "look at
+  large-cap tech") — same rule: only the engine names things.
+"""
+
 
 _EXPLAIN_SYSTEM = """You are an investment assistant explaining stock recommendations.
 You are given a user's stated goal and a shortlist of stocks (ticker, annual volatility %,
@@ -29,18 +90,84 @@ Write a brief, plain-language response that:
 Keep it under 150 words.
 """
 
-_CHAT_SYSTEM = """You are TradeMatrix's investment assistant. You have ALREADY given the
-user stock recommendations in this conversation. Respond conversationally to their latest
-message — DO NOT re-list the recommendations unless they explicitly ask you to.
+_CHAT_SYSTEM = """You are TradeMatrix's investment assistant, talking to a user who does
+NOT have finance expertise. You have ALREADY given the user stock recommendations in this
+conversation. Respond conversationally to their latest message — DO NOT re-list the
+recommendations unless they explicitly ask you to.
 
-If they ask about a stock you recommended, answer using the data already surfaced.
+If the message includes a `[SEC context: ...]` block, you have real SEC-filed data for one
+of the recommended stocks. Use it to do fundamental analysis IN PLAIN ENGLISH:
+- No jargon (no "EBITDA", "ROE", "P/E ratio") without immediately explaining it
+- Use everyday analogies ("Revenue is the money the company brought in from selling stuff.
+  Net income is what's left after paying all their bills.")
+- Focus on 1–2 clear takeaways ("Revenue is growing, and they're generating more cash than
+  they need to run the business — that's a healthy sign") rather than reciting every number
+- Highlight the SIGNAL, not the raw numbers
+
 If they want new/different recommendations, tell them to name the constraint they want
 changed (e.g. "higher return target", "different sector") — do not invent numbers.
 If they're just chatting, chat naturally and briefly. Push back on hallucinations.
 
 Do NOT invent price, return, or volatility figures beyond what's in the context.
-Under 120 words. End with: "Historical data does not guarantee future returns."
+Under 180 words. End with: "Historical data does not guarantee future returns."
 """
+
+# Words that suggest a fundamental-analysis question (used to decide whether
+# to include SEC context for the top pick when no specific ticker is named).
+_FUNDAMENTAL_KEYWORDS = (
+    "fundamental", "financial", "revenue", "profit", "earnings", "cash flow",
+    "balance sheet", "debt", "margin", "10-k", "10-q", "sec", "filing",
+    "healthy", "growing", "grow", "sales", "book value",
+)
+
+
+def _describe_known(goal: InvestmentGoal) -> str:
+    """One-line summary of constraints the user has already told us."""
+    bits: list[str] = []
+    if goal.target_annual_return_pct is not None:
+        bits.append(f"targets ~{goal.target_annual_return_pct:g}% annual return")
+    if goal.risk_preference:
+        bits.append(f"{goal.risk_preference} risk tolerance")
+    elif goal.max_volatility_pct is not None:
+        bits.append(f"volatility cap ~{goal.max_volatility_pct:g}%")
+    if goal.sectors:
+        bits.append(f"interested in {', '.join(goal.sectors)}")
+    if goal.max_recommendations:
+        bits.append(f"wants {goal.max_recommendations} pick(s)")
+    return "; ".join(bits) if bits else "nothing yet"
+
+
+def _describe_missing(goal: InvestmentGoal) -> str:
+    """Plain-English list of what still needs to be gathered."""
+    missing: list[str] = []
+    if goal.target_annual_return_pct is None:
+        missing.append("their target annual return")
+    if goal.max_volatility_pct is None and not goal.risk_preference:
+        missing.append("their comfort with risk / volatility")
+    if not goal.sectors:
+        missing.append("which sectors interest them (Tech, Medical, Finance)")
+    if goal.max_recommendations is None:
+        missing.append("how many recommendations they'd like")
+    return "; ".join(missing) if missing else "nothing — you have enough to make picks"
+
+
+def _tickers_for_sec_context(user_message: str, recs: list[Recommendation]) -> list[str]:
+    """Pick which recommended tickers deserve SEC context on this turn.
+
+    Explicit mention in the message > fundamental-analysis keyword hits top pick.
+    Neither present → no SEC lookup (keeps chat cheap and context tight).
+    """
+    if not recs:
+        return []
+    rec_tickers = [r.stock.ticker for r in recs]
+    upper = user_message.upper()
+    mentioned = [t for t in rec_tickers if t in upper]
+    if mentioned:
+        return mentioned[:3]  # cap to avoid context bloat
+    lower = user_message.lower()
+    if any(kw in lower for kw in _FUNDAMENTAL_KEYWORDS):
+        return rec_tickers[:1]
+    return []
 
 
 def _goal_materially_changed(before: InvestmentGoal, after: InvestmentGoal) -> bool:
@@ -69,6 +196,9 @@ class AssistantState:
     # messages go through chat/refine mode instead of re-running the pipeline.
     has_recommended: bool = False
     last_recommendations: list[Recommendation] = field(default_factory=list)
+    # Username of the signed-in user — set by the UI when a session starts, so
+    # the assistant can look up their portfolio for context. Empty in tests.
+    username: str = ""
 
 
 @dataclass
@@ -110,11 +240,48 @@ class InvestmentAssistant:
                 return self._recommend(state)
             return self._chat(state)
 
-        question = next_missing_question(state.goal)
-        if question is not None:
-            return self._record(state, question)
+        # Sensible-default shortcut: if the user has already given return, risk,
+        # and sectors, don't stall waiting for a specific count — default to 5.
+        # Prevents the "give me all" case where the LLM otherwise invents stocks
+        # because the goal never completes.
+        g = state.goal
+        if (
+            g.max_recommendations is None
+            and g.target_annual_return_pct is not None
+            and (g.max_volatility_pct is not None or g.risk_preference)
+            and g.sectors
+        ):
+            g.max_recommendations = 5
 
-        return self._recommend(state)
+        if state.goal.is_complete():
+            return self._recommend(state)
+
+        # Still gathering — compose a warm, conversational response instead of
+        # reading a hardcoded question off the list. Falls back to the scripted
+        # question only if the LLM composer fails (so the flow never stalls).
+        return self._compose_gathering_response(state)
+
+    def _compose_gathering_response(self, state: AssistantState) -> AssistantReply:
+        context = (
+            f"What you already know: {_describe_known(state.goal)}.\n"
+            f"Still missing: {_describe_missing(state.goal)}."
+        )
+        try:
+            reply = self._llm(
+                _GATHERING_SYSTEM,
+                [
+                    {"role": "system", "content": context},
+                    *state.messages[-8:],
+                ],
+            )
+            if not reply.strip():
+                raise RuntimeError("empty response")
+            return self._record(state, reply.strip())
+        except Exception:
+            # Composer failed — fall back to the scripted next question so we
+            # never leave the user with nothing.
+            fallback = next_missing_question(state.goal) or "What else should I know?"
+            return self._record(state, fallback)
 
     def _chat(self, state: AssistantState) -> AssistantReply:
         """Conversational follow-up after recommendations exist — no re-recommend."""
@@ -133,11 +300,31 @@ class InvestmentAssistant:
             )
             + "."
         )
+
+        # If the user's latest turn is about fundamentals (or names a specific
+        # stock), fetch SEC data for the relevant ticker(s) so the LLM can do
+        # real fundamental analysis instead of guessing from memory.
+        last_user_msg = next(
+            (m["content"] for m in reversed(state.messages) if m["role"] == "user"),
+            "",
+        )
+        sec_tickers = _tickers_for_sec_context(last_user_msg, state.last_recommendations)
+        sec_blocks = [financials_summary(t) for t in sec_tickers]
+        sec_context = ""
+        if sec_blocks:
+            sec_context = "[SEC context — use this for fundamental analysis]\n" + "\n\n".join(sec_blocks)
+
+        portfolio_summary = get_portfolio_summary(state.username)
+
         try:
             reply = self._llm(
                 _CHAT_SYSTEM,
                 [
                     {"role": "system", "content": summary},
+                    *([{"role": "system", "content":
+                        "[User's current portfolio — reference when relevant]\n" + portfolio_summary}]
+                      if portfolio_summary else []),
+                    *([{"role": "system", "content": sec_context}] if sec_context else []),
                     *state.messages[-6:],
                 ],
             )

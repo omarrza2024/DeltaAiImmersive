@@ -19,6 +19,11 @@ from finance_dashboard.models import (
     period_index,
 )
 from finance_dashboard.assistant.ui import render_assistant_tab
+from finance_dashboard.auth.ui import (
+    render_sidebar_account_panel,
+    require_login,
+)
+from finance_dashboard.portfolio.ui import render_portfolio_tab
 from finance_dashboard.recommender.models import FeatureName, RecommendationRequest, StrategyName
 from finance_dashboard.recommender.universe import ETF_FALLBACK_HOLDINGS, PREDEFINED_UNIVERSES
 
@@ -48,31 +53,16 @@ _STRATEGY_LABELS: dict[str, str] = {
 _RECOMMENDER_PERIODS = ["1 month", "1 year", "5 years"]
 
 
-def _render_sidebar_defaults() -> tuple[str, str, str]:
-    """Sidebar holds shared defaults + stock-color pickers."""
+def _render_default_period_selector() -> str:
     with st.sidebar:
+        st.divider()
         st.subheader("Defaults")
-        period = st.selectbox(
+        return st.selectbox(
             "Default time range",
             list(PERIOD_OPTIONS.keys()),
             index=period_index(DEFAULT_PERIOD_LABEL, list(PERIOD_OPTIONS.keys())),
             key="default_period",
         )
-        st.subheader("Stock colors")
-        c1, c2 = st.columns(2)
-        gain = c1.color_picker(
-            "Gain",
-            value=st.session_state.get("gain_color", "#00E676"),
-            key="gain_color",
-            help="Used for positive returns, up-moves, and Low-Risk labels.",
-        )
-        loss = c2.color_picker(
-            "Loss",
-            value=st.session_state.get("loss_color", "#FF3B30"),
-            key="loss_color",
-            help="Used for negative returns, down-moves, and High-Risk-Negative labels.",
-        )
-    return period, gain, loss
 
 
 def _render_price_inputs(default_period: str) -> tuple[list[str], str]:
@@ -322,11 +312,11 @@ def main() -> None:
                      font-family:"Inter", sans-serif; }
         .kpi-value { color:#E8ECEF; font-size:1.35rem; font-weight:600;
                      margin-top:0.2rem; letter-spacing:-0.01em; }
-        .kpi.pos .kpi-value  { color:var(--gain, #00E676); }
-        .kpi.neg .kpi-value  { color:var(--loss, #FF3B30); }
-        .kpi.low .kpi-value  { color:var(--gain, #00E676); }
+        .kpi.pos .kpi-value  { color:#00E676; }
+        .kpi.neg .kpi-value  { color:#FF3B30; }
+        .kpi.low .kpi-value  { color:#00E676; }
         .kpi.med .kpi-value  { color:#FFB800; }
-        .kpi.high .kpi-value { color:var(--loss, #FF3B30); }
+        .kpi.high .kpi-value { color:#FF3B30; }
 
         /* === STOCK HEADER === */
         .stock-header { display:flex; align-items:baseline; gap:0.7rem; margin:0.5rem 0 0;
@@ -353,11 +343,11 @@ def main() -> None:
                       font-weight:600; background:#151820; color:#B8C0C8;
                       border:1px solid #1E2027; letter-spacing:0.05em;
                       font-family:"Inter", sans-serif; text-transform:uppercase; }
-        .chip.pos   { background:color-mix(in srgb, var(--gain, #00E676) 12%, transparent); color:var(--gain, #00E676); border-color:color-mix(in srgb, var(--gain, #00E676) 30%, transparent); }
-        .chip.neg   { background:color-mix(in srgb, var(--loss, #FF3B30) 12%, transparent); color:var(--loss, #FF3B30); border-color:color-mix(in srgb, var(--loss, #FF3B30) 30%, transparent); }
-        .chip.low   { background:color-mix(in srgb, var(--gain, #00E676) 12%, transparent); color:var(--gain, #00E676); border-color:color-mix(in srgb, var(--gain, #00E676) 30%, transparent); }
+        .chip.pos   { background:color-mix(in srgb, #00E676 12%, transparent); color:#00E676; border-color:color-mix(in srgb, #00E676 30%, transparent); }
+        .chip.neg   { background:color-mix(in srgb, #FF3B30 12%, transparent); color:#FF3B30; border-color:color-mix(in srgb, #FF3B30 30%, transparent); }
+        .chip.low   { background:color-mix(in srgb, #00E676 12%, transparent); color:#00E676; border-color:color-mix(in srgb, #00E676 30%, transparent); }
         .chip.med   { background:rgba(255,184,0,0.1); color:#FFB800; border-color:rgba(255,184,0,0.3); }
-        .chip.high  { background:color-mix(in srgb, var(--loss, #FF3B30) 12%, transparent); color:var(--loss, #FF3B30); border-color:color-mix(in srgb, var(--loss, #FF3B30) 30%, transparent); }
+        .chip.high  { background:color-mix(in srgb, #FF3B30 12%, transparent); color:#FF3B30; border-color:color-mix(in srgb, #FF3B30 30%, transparent); }
 
         /* Match-score bar — sharper */
         .match-bar { display:flex; align-items:center; gap:0.6rem; margin:0.25rem 0 0.4rem; }
@@ -410,6 +400,23 @@ def main() -> None:
             border-color:#3B82F6 !important;
             box-shadow:0 0 0 3px color-mix(in srgb, #3B82F6 20%, transparent) !important;
         }
+
+        /* === TYPING DOTS — shows while waiting for the LLM === */
+        .typing-indicator {
+            display:inline-flex; align-items:center; gap:0.35rem;
+            padding:0.4rem 0.1rem;
+        }
+        .typing-indicator span {
+            width:8px; height:8px; border-radius:50%;
+            background:#3B82F6;
+            animation:typing-bounce 1.2s infinite ease-in-out;
+        }
+        .typing-indicator span:nth-child(2) { animation-delay:0.15s; }
+        .typing-indicator span:nth-child(3) { animation-delay:0.30s; }
+        @keyframes typing-bounce {
+            0%, 60%, 100% { transform:translateY(0);    opacity:0.35; }
+            30%           { transform:translateY(-6px); opacity:1;    }
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -421,16 +428,21 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    default_period, gain, loss = _render_sidebar_defaults()
-    # Inject the user-picked gain/loss colors as CSS variables — all styles read them.
-    st.markdown(
-        f"<style>:root {{ --gain: {gain}; --loss: {loss}; }}</style>",
-        unsafe_allow_html=True,
-    )
+    # Auth gate: nothing renders below unless the user is signed in.
+    if require_login() is None:
+        return
+
+    # Sidebar: profile / chats / logout / comparison-color pickers (from Mongo).
+    # The two returned colors feed into palette() for multi-series charts only —
+    # semantic gain/loss coloring is hardcoded green/red in CSS + charts.py.
+    render_sidebar_account_panel()
+    default_period = _render_default_period_selector()
+
     controller = VisualizationController()
 
-    tab_price, tab_compare, tab_corr, tab_recommend, tab_assistant = st.tabs(
-        ["Prices & volatility", "Compare two stocks", "Correlation", "Recommender", "Investment Assistant"]
+    tab_price, tab_compare, tab_corr, tab_recommend, tab_portfolio, tab_assistant = st.tabs(
+        ["Prices & volatility", "Compare two stocks", "Correlation", "Recommender",
+         "Portfolio", "Investment Assistant"]
     )
 
     with tab_price:
@@ -468,6 +480,9 @@ def main() -> None:
 
     with tab_recommend:
         _render_recommender_tab(controller, default_period)
+
+    with tab_portfolio:
+        render_portfolio_tab()
 
     with tab_assistant:
         render_assistant_tab()

@@ -212,6 +212,66 @@ def _render_statement(title: str, rows: dict[str, dict[str, float]], years: list
     return lines
 
 
+def _pct_change(newest: float | None, older: float | None) -> str:
+    if newest is None or older is None or not older:
+        return "n/a"
+    return f"{(newest / older - 1.0) * 100:+.0f}% YoY"
+
+
+def _first_present_year_values(row: dict[str, float], years: list[str]) -> list[tuple[str, float]]:
+    return [(y, row[y]) for y in years if y in row]
+
+
+def financials_summary(ticker: str) -> str:
+    """Compact plain-text SEC snapshot the LLM can drop into an answer.
+
+    Meant to be injected into the system prompt when the user asks about a
+    specific stock. Short enough to keep context bloat low; concrete numbers so
+    the LLM never has to invent them.
+    """
+    try:
+        memo = fetch_company_memo(ticker)
+    except FinancialsUnavailableError as exc:
+        return f"[{ticker}: SEC data unavailable — {exc}]"
+
+    lines: list[str] = [f"=== {memo.name or ticker} ({ticker}) — SEC data ==="]
+    if memo.industry:
+        lines.append(f"Industry: {memo.industry}")
+
+    years = memo.years[:3]
+    if not years:
+        lines.append("No structured financial data available in recent filings.")
+        return "\n".join(lines)
+
+    def row_line(label: str, row: dict[str, float]) -> str | None:
+        vals = _first_present_year_values(row, years)
+        if not vals:
+            return None
+        formatted = ", ".join(f"{y} {_fmt_dollars_millions(v)}" for y, v in vals)
+        yoy = _pct_change(vals[0][1] if vals else None,
+                          vals[1][1] if len(vals) > 1 else None)
+        return f"{label}: {formatted} ({yoy})"
+
+    for label, row in memo.income_statement.items():
+        line = row_line(label, row)
+        if line:
+            lines.append(line)
+    for label, row in memo.balance_sheet.items():
+        line = row_line(label, row)
+        if line:
+            lines.append(line)
+    op_cf = memo.cash_flow.get("Operating", {})
+    op_line = row_line("Operating Cash Flow", op_cf)
+    if op_line:
+        lines.append(op_line)
+
+    if memo.recent_filings:
+        latest = memo.recent_filings[0]
+        lines.append(f"Latest filing: {latest.get('form', '?')} on {latest.get('date', '?')}")
+
+    return "\n".join(lines)
+
+
 def render_memo_markdown(memo: CompanyMemo) -> str:
     """Format a CompanyMemo as a markdown investment memo."""
     lines: list[str] = [

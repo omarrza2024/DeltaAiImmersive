@@ -64,14 +64,39 @@ def _goal_json(**overrides) -> str:
 
 
 def test_asks_next_missing_field_when_goal_incomplete():
-    assistant, llm = make_assistant([_goal_json(target_annual_return_pct=10.0)])
+    # 1st LLM call: parser JSON. 2nd: LLM-composed warm follow-up.
+    composer_response = "Great, 10% is a solid target. What's your comfort with risk?"
+    assistant, llm = make_assistant([
+        _goal_json(target_annual_return_pct=10.0),
+        composer_response,
+    ])
     state = assistant.new_state()
     reply = assistant.handle_message(state, "I want about 10% return")
     assert isinstance(reply, AssistantReply)
-    # State absorbed the return; next question should be about risk/volatility.
     assert state.goal.target_annual_return_pct == 10.0
+    # The LLM composes the response; here we scripted one that mentions risk.
     assert ("volatility" in reply.message.lower() or "risk" in reply.message.lower())
     assert reply.recommendations == []
+
+
+def test_gathering_response_composed_by_llm_not_hardcoded():
+    """The follow-up prompt should be an LLM call, not a hardcoded string."""
+    composer_response = "Sounds great — let's talk about risk next."
+    assistant, llm = make_assistant([
+        _goal_json(target_annual_return_pct=10.0),
+        composer_response,
+    ])
+    state = assistant.new_state()
+    reply = assistant.handle_message(state, "10% return please")
+
+    # Two LLM calls: parser (JSON) + composer (natural language).
+    assert len(llm.calls) == 2
+    _, _, json_mode_first = llm.calls[0]
+    _, _, json_mode_second = llm.calls[1]
+    assert json_mode_first is True   # parser
+    assert json_mode_second is False # composer
+    # And the reply is the composer's output verbatim.
+    assert composer_response in reply.message
 
 
 def test_runs_pipeline_when_goal_complete_and_returns_top_n():
@@ -194,3 +219,114 @@ def test_followup_with_changed_constraint_reruns_recommender():
     assistant.handle_message(state, "10% return, moderate, tech, top 2")
     second = assistant.handle_message(state, "actually make it 20%")
     assert second.recommendations, "changed target return must trigger a re-run"
+
+
+def test_ticker_mention_injects_sec_context_into_chat(monkeypatch):
+    """When a user asks about a specific recommended stock, its SEC summary
+    is injected into the LLM's system context — but only for that ticker."""
+    import finance_dashboard.assistant.assistant as asst_mod
+
+    monkeypatch.setattr(
+        asst_mod,
+        "financials_summary",
+        lambda t: f"[SEC-CONTEXT for {t}: revenue up, cash strong]",
+    )
+
+    goal_json = _goal_json(
+        target_annual_return_pct=8.0,
+        max_volatility_pct=50.0,
+        sectors=["Tech"],
+        max_recommendations=2,
+    )
+    assistant, llm = make_assistant([goal_json, "picks", goal_json, "reply"])
+    state = assistant.new_state()
+    state.custom_tickers = ("CALM1", "CALM2", "WILD1", "WILD2", "WILD3")
+
+    first = assistant.handle_message(state, "10% return, moderate, tech, top 2")
+    top_ticker    = first.recommendations[0].stock.ticker
+    other_ticker  = first.recommendations[1].stock.ticker
+    assistant.handle_message(state, f"tell me about {top_ticker}'s fundamentals")
+
+    # The most recent LLM call is the chat reply — its system+messages must
+    # include the SEC context for the ticker the user mentioned, and NOT the other.
+    system, messages, _ = llm.calls[-1]
+    context_dump = system + " " + " ".join(m["content"] for m in messages)
+    assert f"SEC-CONTEXT for {top_ticker}" in context_dump
+    assert f"SEC-CONTEXT for {other_ticker}" not in context_dump
+
+
+def test_only_missing_count_defaults_to_five_and_runs_recommender():
+    """When return/risk/sectors are set and only count is missing, don't stall —
+    default to 5 and run the pipeline. This fixes the "hangs asking how many"
+    UX bug that led the LLM to invent stock names instead."""
+    goal_json = _goal_json(
+        target_annual_return_pct=10.0,
+        max_volatility_pct=25.0,
+        sectors=["Medical"],
+        max_recommendations=None,  # user didn't specify — should default
+    )
+    assistant, llm = make_assistant([goal_json, "here are your picks"])
+    state = assistant.new_state()
+    state.custom_tickers = ("CALM1", "CALM2", "WILD1", "WILD2", "WILD3")
+
+    reply = assistant.handle_message(state, "give me all that fit my criteria")
+    assert reply.recommendations, "should have produced recommendations (not asked again)"
+    assert state.goal.max_recommendations == 5  # auto-defaulted
+
+
+def test_portfolio_context_is_injected_into_chat(monkeypatch):
+    """When the user has holdings, the chat call must include a portfolio summary."""
+    import finance_dashboard.assistant.assistant as asst_mod
+
+    # Fake portfolio provider — returns a signal-string we can grep for.
+    monkeypatch.setattr(
+        asst_mod,
+        "get_portfolio_summary",
+        lambda username: "[PORTFOLIO-SUMMARY: AAPL 60% Tech, JNJ 40% Healthcare]",
+    )
+
+    goal_json = _goal_json(
+        target_annual_return_pct=8.0,
+        max_volatility_pct=50.0,
+        sectors=["Tech"],
+        max_recommendations=2,
+    )
+    assistant, llm = make_assistant([goal_json, "picks", goal_json, "reply"])
+    state = assistant.new_state()
+    state.custom_tickers = ("CALM1", "CALM2", "WILD1", "WILD2", "WILD3")
+    state.username = "alice"
+
+    assistant.handle_message(state, "10% return, moderate, tech, top 2")
+    assistant.handle_message(state, "chat with me")
+
+    # Chat call is the last one — its context must include the portfolio summary.
+    system, messages, _ = llm.calls[-1]
+    context_dump = system + " " + " ".join(m["content"] for m in messages)
+    assert "PORTFOLIO-SUMMARY" in context_dump
+
+
+def test_unrelated_chat_does_not_fetch_sec(monkeypatch):
+    """If the user isn't asking about fundamentals, don't spend an SEC fetch."""
+    import finance_dashboard.assistant.assistant as asst_mod
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        asst_mod,
+        "financials_summary",
+        lambda t: calls.append(t) or f"[SEC for {t}]",
+    )
+
+    goal_json = _goal_json(
+        target_annual_return_pct=8.0,
+        max_volatility_pct=50.0,
+        sectors=["Tech"],
+        max_recommendations=2,
+    )
+    assistant, llm = make_assistant([goal_json, "picks", goal_json, "chat back"])
+    state = assistant.new_state()
+    state.custom_tickers = ("CALM1", "CALM2", "WILD1", "WILD2", "WILD3")
+
+    assistant.handle_message(state, "10% return, moderate, tech, top 2")
+    assistant.handle_message(state, "hi, just saying hello")
+
+    assert calls == []  # no SEC lookup for a generic hello

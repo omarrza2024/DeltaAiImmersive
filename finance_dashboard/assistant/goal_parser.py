@@ -15,7 +15,7 @@ Return ONLY a JSON object with exactly these keys:
   max_volatility_pct        (number; ONLY extract if the user gives an explicit % — do NOT convert risk words. Also set from a risk word as a safety cap: low=20, medium=35, high=60)
   risk_preference           (string "low" | "medium" | "high"; ONLY set if the user used a risk word like low/conservative/safe (=low), moderate/medium/balanced (=medium), high/aggressive/growth (=high). null if they gave only a number.)
   sectors                   (array of strings from {sorted(PREDEFINED_UNIVERSES)}; null if not mentioned)
-  max_recommendations       (integer; null if not mentioned)
+  max_recommendations       (integer; null if not mentioned. Map "all"/"any"/"as many"/"however many" -> 10; "a couple"/"few" -> 3; "handful" -> 5)
 
 Rules:
 - Never invent a value the user did not provide, however weakly.
