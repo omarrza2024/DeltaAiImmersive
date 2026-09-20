@@ -1,15 +1,61 @@
-"""Login/signup screen + logged-in sidebar (profile, chats, logout)."""
+"""Login/signup screen + logged-in sidebar (profile, chats, logout).
+
+Session persistence: on successful login/signup we put a signed JWT into the
+URL as `?s=<token>`. On every render we check `st.query_params` before showing
+the login gate, so a page refresh keeps the user signed in. This works
+instantly across refreshes (no async widget mount delay).
+
+Tradeoff: the token is briefly visible in the URL — that's an intentional
+security compromise for a personal project. The JWT is signed with a secret
+derived from MONGO_URI, so forging one requires access to your Mongo creds.
+"""
 
 from __future__ import annotations
 
 import streamlit as st
 
-from finance_dashboard.auth import chats, profiles, users
+from finance_dashboard.auth import chats, profiles, session, users
 from finance_dashboard.auth.db import get_db
 from finance_dashboard.models import UserInputError
 
 _USER_KEY = "auth_user"
 _CHAT_ID_KEY = "current_chat_id"
+_TOKEN_PARAM = "s"
+_TOKEN_MAX_AGE_DAYS = 7
+
+
+def _issue_session_token(username: str) -> None:
+    """Store a signed JWT in the URL query params so refresh keeps the session."""
+    token = session.encode_token(username, max_age_days=_TOKEN_MAX_AGE_DAYS)
+    if not token:
+        return
+    try:
+        st.query_params[_TOKEN_PARAM] = token
+    except Exception:
+        pass  # persistence failure must never break login itself
+
+
+def _clear_session_token() -> None:
+    try:
+        if _TOKEN_PARAM in st.query_params:
+            del st.query_params[_TOKEN_PARAM]
+    except Exception:
+        pass
+
+
+def _restore_from_url() -> None:
+    """If a valid session token is in ?s=, populate session_state[_USER_KEY]."""
+    if _USER_KEY in st.session_state:
+        return
+    try:
+        token = st.query_params.get(_TOKEN_PARAM)
+    except Exception:
+        return
+    if not token:
+        return
+    username = session.decode_token(token)
+    if username:
+        st.session_state[_USER_KEY] = username
 
 
 def current_user() -> str | None:
@@ -22,6 +68,7 @@ def is_authenticated() -> bool:
 
 def require_login() -> str | None:
     """Render login/signup gate. Returns username if logged in, else None (caller stops)."""
+    _restore_from_url()
     if is_authenticated():
         return current_user()
 
@@ -46,8 +93,10 @@ def require_login() -> str | None:
             if st.form_submit_button("Log in"):
                 try:
                     users.login(db, username, password)
-                    st.session_state[_USER_KEY] = username.strip()
-                    profiles.get_or_create(db, username.strip())  # default profile if none
+                    uname = username.strip()
+                    st.session_state[_USER_KEY] = uname
+                    profiles.get_or_create(db, uname)  # default profile if none
+                    _issue_session_token(uname)
                     st.rerun()
                 except UserInputError as exc:
                     st.error(str(exc))
@@ -60,8 +109,10 @@ def require_login() -> str | None:
             if st.form_submit_button("Create account"):
                 try:
                     users.signup(db, username, password)
-                    st.session_state[_USER_KEY] = username.strip()
-                    profiles.get_or_create(db, username.strip())
+                    uname = username.strip()
+                    st.session_state[_USER_KEY] = uname
+                    profiles.get_or_create(db, uname)
+                    _issue_session_token(uname)
                     st.success("Account created — signed in.")
                     st.rerun()
                 except UserInputError as exc:
@@ -85,6 +136,7 @@ def render_sidebar_account_panel() -> tuple[str, str]:
     with st.sidebar:
         st.markdown(f"**Signed in as** `{username}`")
         if st.button("Log out", use_container_width=True):
+            _clear_session_token()
             for k in (_USER_KEY, _CHAT_ID_KEY, "assistant_state", "assistant_history"):
                 st.session_state.pop(k, None)
             st.rerun()

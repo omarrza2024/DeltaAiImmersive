@@ -10,3 +10,5 @@ edgartools>=3.0.0
 pymongo>=4.6.0
 bcrypt>=4.1.0
 certifi>=2024.0.0
+PyJWT>=2.8.0
+extra-streamlit-components>=0.1.71
