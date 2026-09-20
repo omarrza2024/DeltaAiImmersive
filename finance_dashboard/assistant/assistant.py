@@ -121,6 +121,22 @@ _FUNDAMENTAL_KEYWORDS = (
 )
 
 
+# Phrases that indicate "just proceed — I've told you enough" intent.
+_PROCEED_KEYWORDS = (
+    "as many as", "as many that", "all that fit", "all the stocks", "all stocks",
+    "give me all", "give me the stocks", "give me the picks", "just give",
+    "just do it", "just show", "proceed", "show me", "put as many",
+    "any that fit", "any stocks", "whatever fits", "let's see", "lets see",
+    "go ahead", "do it", "bring them", "hit me",
+)
+
+
+def _user_wants_to_proceed(message: str) -> bool:
+    """Detect intent to skip further questions and just get recommendations."""
+    low = (message or "").lower()
+    return any(kw in low for kw in _PROCEED_KEYWORDS)
+
+
 def _describe_known(goal: InvestmentGoal) -> str:
     """One-line summary of constraints the user has already told us."""
     bits: list[str] = []
@@ -240,11 +256,27 @@ class InvestmentAssistant:
                 return self._recommend(state)
             return self._chat(state)
 
-        # Sensible-default shortcut: if the user has already given return, risk,
-        # and sectors, don't stall waiting for a specific count — default to 5.
-        # Prevents the "give me all" case where the LLM otherwise invents stocks
-        # because the goal never completes.
+        # Auto-defaults — apply so the conversation doesn't stall.
         g = state.goal
+
+        # (a) If user says "as many as fit my criteria" or similar "proceed"
+        #     intent, and we already know return + sectors, fill in reasonable
+        #     defaults for anything still missing (risk defaults to medium,
+        #     count defaults to 5). Prevents the "just do it" case where the
+        #     goal never completes.
+        if (
+            _user_wants_to_proceed(user_message)
+            and g.target_annual_return_pct is not None
+            and g.sectors
+        ):
+            if g.max_volatility_pct is None and not g.risk_preference:
+                g.risk_preference = "medium"
+                g.max_volatility_pct = 35.0
+            if g.max_recommendations is None:
+                g.max_recommendations = 5
+
+        # (b) If only the count is missing and we have return + risk + sectors,
+        #     default to 5 without asking.
         if (
             g.max_recommendations is None
             and g.target_annual_return_pct is not None

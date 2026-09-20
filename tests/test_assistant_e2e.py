@@ -255,6 +255,30 @@ def test_ticker_mention_injects_sec_context_into_chat(monkeypatch):
     assert f"SEC-CONTEXT for {other_ticker}" not in context_dump
 
 
+def test_proceed_intent_fills_all_missing_defaults_and_runs():
+    """When the user has told us return + sectors and then says something like
+    'put as many as fit my criteria', don't keep grilling them — fill in
+    reasonable defaults for risk and count, then run the recommender."""
+    # Parser returns a goal missing risk AND count (both None). No matter — the
+    # 'proceed' intent should fill them in.
+    goal_json = _goal_json(
+        target_annual_return_pct=10.0,
+        max_volatility_pct=None,
+        sectors=["Tech"],
+        max_recommendations=None,
+    )
+    assistant, llm = make_assistant([goal_json, "here are your picks"])
+    state = assistant.new_state()
+    state.custom_tickers = ("CALM1", "CALM2", "WILD1", "WILD2", "WILD3")
+
+    reply = assistant.handle_message(state, "put as many as fit my criteria")
+    assert reply.recommendations, "'as many as fit' + return + sectors must run the engine"
+    assert state.goal.max_recommendations is not None
+    # risk defaulted
+    assert (state.goal.risk_preference is not None
+            or state.goal.max_volatility_pct is not None)
+
+
 def test_only_missing_count_defaults_to_five_and_runs_recommender():
     """When return/risk/sectors are set and only count is missing, don't stall —
     default to 5 and run the pipeline. This fixes the "hangs asking how many"
