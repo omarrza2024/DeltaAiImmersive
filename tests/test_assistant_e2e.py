@@ -255,14 +255,34 @@ def test_ticker_mention_injects_sec_context_into_chat(monkeypatch):
     assert f"SEC-CONTEXT for {other_ticker}" not in context_dump
 
 
-def test_proceed_intent_fills_all_missing_defaults_and_runs():
-    """When the user has told us return + sectors and then says something like
-    'put as many as fit my criteria', don't keep grilling them — fill in
-    reasonable defaults for risk and count, then run the recommender."""
-    # Parser returns a goal missing risk AND count (both None). No matter — the
-    # 'proceed' intent should fill them in.
+def test_no_preference_phrase_fills_all_sectors_and_runs():
+    """When the user says 'any' / 'idk' / 'just pick based on SEC data', the
+    assistant must fall back to the full universe and run, instead of
+    repeatedly asking for a sector."""
+    from finance_dashboard.recommender.universe import PREDEFINED_UNIVERSES
+
     goal_json = _goal_json(
-        target_annual_return_pct=10.0,
+        target_annual_return_pct=None,
+        max_volatility_pct=None,
+        sectors=None,
+        max_recommendations=None,
+    )
+    assistant, llm = make_assistant([goal_json, "here are picks across every sector"])
+    state = assistant.new_state()
+    state.custom_tickers = ("CALM1", "CALM2", "WILD1", "WILD2", "WILD3")
+
+    reply = assistant.handle_message(state, "idk, just pick for me based on SEC data")
+    assert reply.recommendations, "no-preference phrase must still produce picks"
+    # Fell back to the full universe — every predefined sector is now in play.
+    assert set(state.goal.sectors) == set(PREDEFINED_UNIVERSES.keys())
+
+
+def test_sectors_alone_is_enough_to_run_recommender():
+    """Only sectors are required. If the user doesn't want to specify risk or
+    return targets, the engine proceeds with fundamentals-driven defaults —
+    users shouldn't be forced to guess numbers they're unsure about."""
+    goal_json = _goal_json(
+        target_annual_return_pct=None,
         max_volatility_pct=None,
         sectors=["Tech"],
         max_recommendations=None,
@@ -271,12 +291,14 @@ def test_proceed_intent_fills_all_missing_defaults_and_runs():
     state = assistant.new_state()
     state.custom_tickers = ("CALM1", "CALM2", "WILD1", "WILD2", "WILD3")
 
-    reply = assistant.handle_message(state, "put as many as fit my criteria")
-    assert reply.recommendations, "'as many as fit' + return + sectors must run the engine"
-    assert state.goal.max_recommendations is not None
-    # risk defaulted
-    assert (state.goal.risk_preference is not None
-            or state.goal.max_volatility_pct is not None)
+    reply = assistant.handle_message(state, "just pick based on fundamentals in tech")
+    assert reply.recommendations, "sectors alone must be enough to run the engine"
+    # Count auto-defaults so the shortlist isn't infinite.
+    assert state.goal.max_recommendations == 5
+    # Return/risk were NOT provided — assistant must NOT invent them.
+    assert state.goal.target_annual_return_pct is None
+    assert state.goal.max_volatility_pct is None
+    assert state.goal.risk_preference is None
 
 
 def test_only_missing_count_defaults_to_five_and_runs_recommender():
@@ -298,7 +320,36 @@ def test_only_missing_count_defaults_to_five_and_runs_recommender():
     assert state.goal.max_recommendations == 5  # auto-defaulted
 
 
-def test_portfolio_context_is_injected_into_chat(monkeypatch):
+def test_watchlist_context_is_injected_into_chat(monkeypatch):
+    """When the user has watchlists, the chat call must include a summary."""
+    import finance_dashboard.assistant.assistant as asst_mod
+
+    monkeypatch.setattr(
+        asst_mod,
+        "get_watchlists_summary",
+        lambda username: "[WATCHLIST-SUMMARY: Tech=[AAPL,MSFT], AI=[NVDA]]",
+    )
+
+    goal_json = _goal_json(
+        target_annual_return_pct=8.0,
+        max_volatility_pct=50.0,
+        sectors=["Tech"],
+        max_recommendations=2,
+    )
+    assistant, llm = make_assistant([goal_json, "picks", goal_json, "reply"])
+    state = assistant.new_state()
+    state.custom_tickers = ("CALM1", "CALM2", "WILD1", "WILD2", "WILD3")
+    state.username = "alice"
+
+    assistant.handle_message(state, "10% return, moderate, tech, top 2")
+    assistant.handle_message(state, "chat with me")
+
+    system, messages, _ = llm.calls[-1]
+    dump = system + " " + " ".join(m["content"] for m in messages)
+    assert "WATCHLIST-SUMMARY" in dump
+
+
+def _unused_test_portfolio_context_is_injected_into_chat(monkeypatch):
     """When the user has holdings, the chat call must include a portfolio summary."""
     import finance_dashboard.assistant.assistant as asst_mod
 

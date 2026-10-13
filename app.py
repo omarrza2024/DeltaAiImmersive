@@ -23,7 +23,7 @@ from finance_dashboard.auth.ui import (
     render_sidebar_account_panel,
     require_login,
 )
-from finance_dashboard.portfolio.ui import render_portfolio_tab
+from finance_dashboard.watchlist.ui import render_watchlist_tab
 from finance_dashboard.recommender.models import FeatureName, RecommendationRequest, StrategyName
 from finance_dashboard.recommender.universe import ETF_FALLBACK_HOLDINGS, PREDEFINED_UNIVERSES
 
@@ -41,8 +41,8 @@ _FEATURE_LABELS: dict[str, str] = {
     "Returns": FeatureName.RETURNS.value,
     "SMA": FeatureName.SMA.value,
     "MACD": FeatureName.MACD.value,
-    "Fundamentals (beta, P/E)": FeatureName.FUNDAMENTALS.value,
-    "Sentiment (experimental)": FeatureName.SENTIMENT.value,
+    "Fundamentals (SEC DATA REPORTS)": FeatureName.FUNDAMENTALS.value,
+    "Sentiment": FeatureName.SENTIMENT.value,
 }
 _STRATEGY_LABELS: dict[str, str] = {
     "K-Means": StrategyName.KMEANS.value,
@@ -66,6 +66,12 @@ def _render_default_period_selector() -> str:
 
 
 def _render_price_inputs(default_period: str) -> tuple[list[str], str]:
+    # If the user clicked a ticker in the Watchlist tab, consume the handoff
+    # value BEFORE the widget is instantiated — otherwise Streamlit raises
+    # "cannot be modified after the widget ... is instantiated".
+    pending = st.session_state.pop("_wl_pending_ticker", None)
+    if pending:
+        st.session_state["price_ticker"] = pending
     ticker_raw = st.text_input("Ticker", value="AAPL", key="price_ticker")
     period_label = st.selectbox(
         "Time range",
@@ -119,19 +125,40 @@ def _render_recommender_tab(controller: VisualizationController, default_period:
         "Group stocks into **risk buckets** (Low / Medium / High ±) from an ETF's "
         "holdings, predefined universes, and/or your own tickers."
     )
+    st.caption(
+        "All three sources below are **optional** — but pick **at least one** so "
+        "there are stocks to analyze."
+    )
+
+    # Features selector OUTSIDE the form so the time-range widget can hide
+    # itself when the user picks only time-independent features (Fundamentals
+    # or Sentiment — those read SEC filings / news, which aren't period-based).
+    features = st.multiselect(
+        "Features", list(_FEATURE_LABELS), default=["Volatility", "Returns"],
+        key="recommender_features",
+    )
+    _TIME_DEPENDENT = {"Volatility", "Returns", "SMA", "MACD"}
+    needs_time_range = any(f in _TIME_DEPENDENT for f in features)
+
     with st.form("recommender_form"):
-        c1, c2, c3 = st.columns(3)
-        etf = c1.selectbox("ETF (optional)", ["None"] + sorted(ETF_FALLBACK_HOLDINGS))
-        universes = c2.multiselect("Predefined universes", list(PREDEFINED_UNIVERSES))
-        period_label = c3.selectbox(
-            "Time range",
-            _RECOMMENDER_PERIODS,
-            index=period_index(default_period, _RECOMMENDER_PERIODS),
-        )
-        custom_text = st.text_input("Extra tickers (comma separated)", value="")
-        features = st.multiselect(
-            "Features", list(_FEATURE_LABELS), default=["Volatility", "Returns"]
-        )
+        if needs_time_range:
+            c1, c2, c3 = st.columns(3)
+            etf = c1.selectbox("ETF (optional)", ["None"] + sorted(ETF_FALLBACK_HOLDINGS))
+            universes = c2.multiselect("Predefined universes (optional)", list(PREDEFINED_UNIVERSES))
+            period_label = c3.selectbox(
+                "Time range",
+                _RECOMMENDER_PERIODS,
+                index=period_index(default_period, _RECOMMENDER_PERIODS),
+            )
+        else:
+            c1, c2 = st.columns(2)
+            etf = c1.selectbox("ETF (optional)", ["None"] + sorted(ETF_FALLBACK_HOLDINGS))
+            universes = c2.multiselect("Predefined universes (optional)", list(PREDEFINED_UNIVERSES))
+            # Time range is irrelevant for fundamentals/sentiment-only runs,
+            # but the recommender request still needs a value — pass the
+            # user's default so nothing downstream breaks.
+            period_label = default_period if default_period in _RECOMMENDER_PERIODS else "1 year"
+        custom_text = st.text_input("Extra tickers (optional, comma separated)", value="")
         submitted = st.form_submit_button("Get recommendations")
 
     if not submitted:
@@ -440,9 +467,10 @@ def main() -> None:
 
     controller = VisualizationController()
 
-    tab_price, tab_compare, tab_corr, tab_recommend, tab_portfolio, tab_assistant = st.tabs(
+    (tab_price, tab_compare, tab_corr, tab_recommend,
+     tab_watchlist, tab_assistant) = st.tabs(
         ["Prices & volatility", "Compare two stocks", "Correlation", "Recommender",
-         "Portfolio", "Investment Assistant"]
+         "Watchlist", "Investment Assistant"]
     )
 
     with tab_price:
@@ -481,8 +509,8 @@ def main() -> None:
     with tab_recommend:
         _render_recommender_tab(controller, default_period)
 
-    with tab_portfolio:
-        render_portfolio_tab()
+    with tab_watchlist:
+        render_watchlist_tab()
 
     with tab_assistant:
         render_assistant_tab()

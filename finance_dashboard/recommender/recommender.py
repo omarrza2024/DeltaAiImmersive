@@ -29,7 +29,7 @@ _FEATURE_COLUMNS: dict[FeatureName, list[str]] = {
     FeatureName.SMA: ["sma_ratio"],
     FeatureName.MACD: ["macd_hist"],
     FeatureName.SENTIMENT: ["sentiment"],
-    FeatureName.FUNDAMENTALS: ["beta", "trailing_pe"],
+    FeatureName.FUNDAMENTALS: ["revenue_growth", "profit_margin"],
 }
 
 MarketDataFetcher = Callable[[tuple[str, ...], str], pd.DataFrame]

@@ -11,33 +11,31 @@ from finance_dashboard.assistant.matcher import score_match
 from finance_dashboard.assistant.models import InvestmentGoal, Recommendation
 
 
-def get_portfolio_summary(username: str) -> str:
-    """Return a compact plain-text portfolio summary for the LLM's context.
-
-    Best-effort — returns empty string if Mongo isn't configured, the user isn't
-    signed in, or the user's portfolio is empty/unavailable.
-    """
+def get_watchlists_summary(username: str) -> str:
+    """Return a compact plain-text summary of the user's watchlists for LLM context."""
     if not username:
         return ""
     try:
         from finance_dashboard.auth.db import get_db
-        from finance_dashboard.portfolio import analytics, store
+        from finance_dashboard.watchlist import store
         db = get_db()
         if db is None:
             return ""
-        portfolio = store.get_or_create(db, username)
-        if not portfolio.get("positions"):
+        watchlists = store.list_for_user(db, username)
+        if not watchlists:
             return ""
-        # Lazy-import price/sector lookups to avoid Streamlit-context requirements
-        # when this helper is called from tests without streamlit initialised.
-        from finance_dashboard.portfolio.ui import _current_price, _sector
-        positions = portfolio["positions"]
-        prices = {p["ticker"]: _current_price(p["ticker"]) for p in positions}
-        sectors = {p["ticker"]: _sector(p["ticker"]) for p in positions}
-        enriched = analytics.enrich(positions, prices, sectors)
-        return analytics.summary_for_llm(enriched)
+        lines = [f"User's watchlists ({len(watchlists)}):"]
+        for wl in watchlists:
+            tickers = wl.get("tickers", [])
+            if tickers:
+                lines.append(f"- {wl['name']}: {', '.join(tickers)}")
+            else:
+                lines.append(f"- {wl['name']}: (empty)")
+        return "\n".join(lines)
     except Exception:
         return ""
+
+
 from finance_dashboard.models import UserInputError
 from finance_dashboard.recommender.models import (
     FeatureName,
@@ -45,35 +43,44 @@ from finance_dashboard.recommender.models import (
     StrategyName,
 )
 from finance_dashboard.recommender.recommender import StockRecommender
+from finance_dashboard.recommender.universe import PREDEFINED_UNIVERSES
+from finance_dashboard.sentiment import SentimentResult, fetch_sentiment
 
 DISCLAIMER = "Historical data does not guarantee future returns."
 
 _GATHERING_SYSTEM = """You are the user's warm, personable financial advisor — think
 "knowledgeable friend who happens to help with investing," NOT a survey robot. Your job on
-this turn is to acknowledge what the user just said and, if you still need info to build
-their portfolio, ask for it naturally.
+this turn is to acknowledge what the user just said and move the conversation forward.
 
 You will be given:
 - The full recent chat
 - A brief summary of what you already know about their goals
-- What's still missing to make solid recommendations
+- What's still open
+
+CRITICAL — what the engine actually needs:
+- NOTHING is required. The user can skip every question and we'll still run.
+- If they name a sector (Tech / Medical / Finance), great — we'll scope the search there.
+- If they skip the sector question — saying "any" / "idk" / "whatever" / "just pick for
+  me based on SEC data" — we'll run across EVERY sector automatically. Do NOT keep
+  asking. Confirm the fallback and tell them we're pulling picks.
+- Target return %, risk comfort, how many picks — all optional. Offer, never demand.
 
 Rules for THIS response:
-- Acknowledge what they told you (validate, don't parrot). E.g., "10% is a reasonable target"
-  or "Tech is a fun space to be in right now" — a short human beat.
-- If they asked YOU a question, answer briefly BEFORE steering to the next thing you need.
-- If their constraint is unrealistic (e.g. "20% return with zero risk", "get me rich next
-  month"), push back gently and honestly — set expectations without being preachy.
-- Then, in ONE natural sentence, ask about whatever piece is missing next. Don't list all
-  the missing fields. Don't say "next question is". Don't sound like a form.
+- Acknowledge what they told you (validate, don't parrot). A short human beat.
+- If they asked YOU a question, answer briefly BEFORE moving on.
+- If their constraint is unrealistic (e.g. "20% return with zero risk"), push back gently.
+- If sectors are still missing: ask once in ONE natural sentence AND mention they can
+  say "any" or "just pick for me" to skip it.
+- If sectors ARE set and the user hasn't shown interest in specifying return/risk/count:
+  do NOT demand those. Confirm you're ready to pull picks and mention they can
+  optionally share a return target or risk preference if they want finer control.
 - Warm but efficient: 1-3 sentences total. Use conjunctions, contractions, occasional "we".
 - Do NOT invent numbers. Do NOT re-list past choices. Do NOT thank them for "sharing".
 
 CRITICAL — you are NOT allowed to:
-- Name any specific stock, ticker, ETF, fund, or bond (no "VHT", "JNJ", "healthcare ETF",
-  "blue-chip pharma", "dividend fund", etc.). Recommendations come from a separate
-  calculation engine AFTER we have enough info. If the user is pushing for picks right now,
-  briefly confirm the last missing detail so we can run the engine.
+- Name any specific stock, ticker, ETF, fund, or bond. Recommendations come from a
+  separate calculation engine. If the user is pushing for picks right now and sectors
+  are known, confirm you'll run the engine now.
 - Suggest categories that sound like recommendations ("consider a bond fund", "look at
   large-cap tech") — same rule: only the engine names things.
 """
@@ -81,13 +88,17 @@ CRITICAL — you are NOT allowed to:
 
 _EXPLAIN_SYSTEM = """You are an investment assistant explaining stock recommendations.
 You are given a user's stated goal and a shortlist of stocks (ticker, annual volatility %,
-historical return %, match score 0-100) that Python already scored. Do NOT recompute anything.
+historical return %, match score 0-100) that Python already scored. Some lines may also
+include news sentiment (positive/negative/neutral with an average score and article count)
+pulled from recent news. Do NOT recompute anything.
 
 Write a brief, plain-language response that:
 - Names each stock and why it matches (or nearly matches) the goal.
+- When news sentiment is provided, briefly note the slant ("news is reading positive on
+  AAPL right now across 3 articles") — a one-line tie-breaker, not a lecture.
 - Pushes back if the user's constraints are unusually strict or contradictory.
 - Always ends with the disclaimer: "Historical data does not guarantee future returns."
-Keep it under 150 words.
+Keep it under 180 words.
 """
 
 _CHAT_SYSTEM = """You are TradeMatrix's investment assistant, talking to a user who does
@@ -121,20 +132,42 @@ _FUNDAMENTAL_KEYWORDS = (
 )
 
 
-# Phrases that indicate "just proceed — I've told you enough" intent.
-_PROCEED_KEYWORDS = (
-    "as many as", "as many that", "all that fit", "all the stocks", "all stocks",
-    "give me all", "give me the stocks", "give me the picks", "just give",
-    "just do it", "just show", "proceed", "show me", "put as many",
-    "any that fit", "any stocks", "whatever fits", "let's see", "lets see",
-    "go ahead", "do it", "bring them", "hit me",
+# Phrases that mean "I don't care which sector" or "just pick for me based on
+# fundamentals / SEC data". When the user says one of these and we still have
+# no sectors, we fall back to the full universe so the engine can run instead
+# of grilling them for a sector pick.
+_NO_PREFERENCE_PHRASES = (
+    "any sector", "all sector", "any sectors", "all sectors", "every sector",
+    "any", "all", "whatever", "doesn't matter", "doesnt matter",
+    "no preference", "idk", "i don't know", "i dont know", "not sure",
+    "just pick", "pick for me", "you pick", "surprise me", "pick anything",
+    "based on sec", "sec only", "sec data", "just fundamentals", "fundamentals only",
+    "proceed", "go ahead", "just go", "whatever you think", "whatever fits",
 )
 
 
-def _user_wants_to_proceed(message: str) -> bool:
-    """Detect intent to skip further questions and just get recommendations."""
+def _user_wants_any_sector(message: str) -> bool:
+    """True when the user signals they don't want to pick a sector."""
     low = (message or "").lower()
-    return any(kw in low for kw in _PROCEED_KEYWORDS)
+    return any(phrase in low for phrase in _NO_PREFERENCE_PHRASES)
+
+
+def _fetch_sentiment_for_shortlist(
+    shortlist: list[tuple],
+) -> dict[str, SentimentResult]:
+    """Best-effort sentiment lookup for the recommended tickers.
+
+    Marketaux may be unavailable (missing key, rate-limited, network down) or
+    this call may be running outside Streamlit (tests). Any failure is caught
+    so sentiment is a bonus signal, never a blocker for recommendations.
+    """
+    out: dict[str, SentimentResult] = {}
+    for stock, _ in shortlist:
+        try:
+            out[stock.ticker] = fetch_sentiment(stock.ticker)
+        except Exception:
+            continue
+    return out
 
 
 def _describe_known(goal: InvestmentGoal) -> str:
@@ -154,17 +187,32 @@ def _describe_known(goal: InvestmentGoal) -> str:
 
 
 def _describe_missing(goal: InvestmentGoal) -> str:
-    """Plain-English list of what still needs to be gathered."""
-    missing: list[str] = []
-    if goal.target_annual_return_pct is None:
-        missing.append("their target annual return")
-    if goal.max_volatility_pct is None and not goal.risk_preference:
-        missing.append("their comfort with risk / volatility")
+    """Plain-English list of what still needs to be gathered.
+
+    Everything is optional — sector too. When the user says "any" / "idk" /
+    "pick based on SEC data" we fall back to the full universe and run, so
+    the LLM must OFFER these questions without DEMANDING answers.
+    """
     if not goal.sectors:
-        missing.append("which sectors interest them (Tech, Medical, Finance)")
+        return (
+            "which sectors interest them (Tech, Medical, Finance) — optional; "
+            "if they say 'any', 'idk', 'all', or 'just pick based on SEC data' "
+            "we'll run across every sector"
+        )
+    optional: list[str] = []
+    if goal.target_annual_return_pct is None:
+        optional.append("target annual return (optional)")
+    if goal.max_volatility_pct is None and not goal.risk_preference:
+        optional.append("risk comfort (optional)")
     if goal.max_recommendations is None:
-        missing.append("how many recommendations they'd like")
-    return "; ".join(missing) if missing else "nothing — you have enough to make picks"
+        optional.append("how many picks (optional, defaults to 5)")
+    if optional:
+        return (
+            "; ".join(optional)
+            + " — if the user doesn't want to specify these, proceed with "
+              "fundamentals-driven defaults"
+        )
+    return "nothing — you have everything"
 
 
 def _tickers_for_sec_context(user_message: str, recs: list[Recommendation]) -> list[str]:
@@ -256,34 +304,18 @@ class InvestmentAssistant:
                 return self._recommend(state)
             return self._chat(state)
 
-        # Auto-defaults — apply so the conversation doesn't stall.
-        g = state.goal
+        # No-preference fallback: when the user says "any" / "idk" / "just pick"
+        # / "sec data" and we still have no sectors, use the FULL universe so
+        # the engine can run. The user still saw the sector question — they
+        # chose not to answer, which is a valid answer.
+        if not state.goal.sectors and _user_wants_any_sector(user_message):
+            state.goal.sectors = sorted(PREDEFINED_UNIVERSES.keys())
 
-        # (a) If user says "as many as fit my criteria" or similar "proceed"
-        #     intent, and we already know return + sectors, fill in reasonable
-        #     defaults for anything still missing (risk defaults to medium,
-        #     count defaults to 5). Prevents the "just do it" case where the
-        #     goal never completes.
-        if (
-            _user_wants_to_proceed(user_message)
-            and g.target_annual_return_pct is not None
-            and g.sectors
-        ):
-            if g.max_volatility_pct is None and not g.risk_preference:
-                g.risk_preference = "medium"
-                g.max_volatility_pct = 35.0
-            if g.max_recommendations is None:
-                g.max_recommendations = 5
-
-        # (b) If only the count is missing and we have return + risk + sectors,
-        #     default to 5 without asking.
-        if (
-            g.max_recommendations is None
-            and g.target_annual_return_pct is not None
-            and (g.max_volatility_pct is not None or g.risk_preference)
-            and g.sectors
-        ):
-            g.max_recommendations = 5
+        # Count defaults to 5 whenever the user hasn't picked one — matches the
+        # old UX where users who skip "how many?" still get a shortlist. Done
+        # pre-recommend so state.goal reflects it for the UI/tests.
+        if state.goal.sectors and state.goal.max_recommendations is None:
+            state.goal.max_recommendations = 5
 
         if state.goal.is_complete():
             return self._recommend(state)
@@ -346,7 +378,7 @@ class InvestmentAssistant:
         if sec_blocks:
             sec_context = "[SEC context — use this for fundamental analysis]\n" + "\n\n".join(sec_blocks)
 
-        portfolio_summary = get_portfolio_summary(state.username)
+        watchlists_summary = get_watchlists_summary(state.username)
 
         try:
             reply = self._llm(
@@ -354,8 +386,8 @@ class InvestmentAssistant:
                 [
                     {"role": "system", "content": summary},
                     *([{"role": "system", "content":
-                        "[User's current portfolio — reference when relevant]\n" + portfolio_summary}]
-                      if portfolio_summary else []),
+                        "[User's watchlists — tickers they're tracking]\n" + watchlists_summary}]
+                      if watchlists_summary else []),
                     *([{"role": "system", "content": sec_context}] if sec_context else []),
                     *state.messages[-6:],
                 ],
@@ -386,16 +418,27 @@ class InvestmentAssistant:
                 state, f"Market data unavailable right now ({exc}). Please try again."
             )
 
+        # Primary sort: match score DESC (best fit to the user's goal first).
+        # Tiebreaker: historical return DESC. When the user gave no explicit
+        # return/risk targets, every match score is equal — without a tiebreaker
+        # the stable sort would fall back to the recommender's own risk-score
+        # order (highest risk first), which surfaces the WORST picks at the top.
+        # Highest-return-first is the intuitive "best pick" for an un-constrained
+        # user, and respects match score when they DID set constraints.
         scored = sorted(
             [(s, score_match(s, goal)) for s in result.recommendations],
-            key=lambda p: p[1],
-            reverse=True,
+            key=lambda p: (-p[1], -p[0].features.get("returns", 0.0)),
         )
         top = scored[: goal.max_recommendations or 5]
         no_perfect_match = not any(score >= 80.0 for _, score in top)
 
+        # Best-effort: pull marketaux sentiment for the shortlist so the LLM
+        # can mention how the news currently reads on each pick. Falls back
+        # silently when marketaux is unavailable (tests, missing key, 429).
+        sentiment_by_ticker = _fetch_sentiment_for_shortlist(top)
+
         try:
-            explanation = self._explain(goal, top, no_perfect_match)
+            explanation = self._explain(goal, top, no_perfect_match, sentiment_by_ticker)
         except Exception as exc:
             raise LLMUnavailableError(f"Explanation LLM failed: {exc}") from exc
 
@@ -421,10 +464,20 @@ class InvestmentAssistant:
         goal: InvestmentGoal,
         scored: list[tuple],
         no_perfect_match: bool,
+        sentiment_by_ticker: dict[str, SentimentResult] | None = None,
     ) -> str:
+        sentiment_by_ticker = sentiment_by_ticker or {}
+
+        def _sentiment_fragment(ticker: str) -> str:
+            s = sentiment_by_ticker.get(ticker)
+            if not s or s.article_count == 0:
+                return ""
+            return f", news {s.label.lower()} ({s.avg_score:+.2f} across {s.article_count} article{'s' if s.article_count != 1 else ''})"
+
         shortlist = "\n".join(
             f"- {s.ticker}: vol={s.features.get('volatility', 0) * 100:.1f}%, "
             f"return={s.features.get('returns', 0) * 100:.1f}%, match={score:.0f}"
+            f"{_sentiment_fragment(s.ticker)}"
             for s, score in scored
         )
         warning = (
@@ -433,11 +486,17 @@ class InvestmentAssistant:
             if no_perfect_match
             else ""
         )
+        sentiment_hint = (
+            "\nWhen a stock has news sentiment info, briefly mention whether the "
+            "recent news reads positive or negative — it's a useful tie-breaker.\n"
+            if any(s.article_count > 0 for s in sentiment_by_ticker.values())
+            else ""
+        )
         user_msg = (
             f"Goal: target return {goal.target_annual_return_pct}%, "
             f"max volatility {goal.max_volatility_pct}%, "
             f"sectors {goal.sectors}, top {goal.max_recommendations}.\n"
-            f"Shortlist:\n{shortlist}{warning}"
+            f"Shortlist:\n{shortlist}{warning}{sentiment_hint}"
         )
         return self._llm(_EXPLAIN_SYSTEM, [{"role": "user", "content": user_msg}])
 

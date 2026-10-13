@@ -37,17 +37,26 @@ def _return_fit(ret_pct: float, target_pct: float) -> float:
 
 
 def score_match(stock: StockRecommendation, goal: InvestmentGoal) -> float:
-    """Score in [0, 100]. Returns 0 if required features are missing."""
+    """Score in [0, 100]. Returns 0 if required features are missing.
+
+    When the user didn't specify a return target or volatility cap, that
+    dimension is skipped (treated as neutral) rather than failing — this
+    supports fundamentals-driven requests where the user doesn't care about
+    historical numbers.
+    """
     vol = stock.features.get("volatility")
     ret = stock.features.get("returns")
     if vol is None or ret is None:
         return 0.0
-    if goal.max_volatility_pct is None or goal.target_annual_return_pct is None:
-        return 0.0
 
-    vol_fit = _volatility_fit(vol * 100.0, goal.max_volatility_pct)
-    ret_fit = _return_fit(ret * 100.0, goal.target_annual_return_pct)
-    base = (vol_fit + ret_fit) / 2.0
+    fits: list[float] = []
+    if goal.max_volatility_pct is not None:
+        fits.append(_volatility_fit(vol * 100.0, goal.max_volatility_pct))
+    if goal.target_annual_return_pct is not None:
+        fits.append(_return_fit(ret * 100.0, goal.target_annual_return_pct))
+    # No preferences at all → neutral score; the recommender's own ordering
+    # (by risk_score) still breaks ties.
+    base = sum(fits) / len(fits) if fits else 1.0
 
     # Risk-preference alignment: if the user said "moderate", strongly reward
     # stocks that got labeled Medium Risk (vs. just anything under the cap).

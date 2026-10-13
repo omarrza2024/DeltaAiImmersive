@@ -21,12 +21,11 @@ class InvestmentGoal:
     risk_preference: str | None = None
 
     def is_complete(self) -> bool:
-        return (
-            self.target_annual_return_pct is not None
-            and self.max_volatility_pct is not None
-            and bool(self.sectors)
-            and self.max_recommendations is not None
-        )
+        # Only sectors are required — needed to pick the universe to score.
+        # Return target, volatility cap, risk label, and count are optional:
+        # a user who just wants fundamentals-driven picks can skip them, and
+        # _apply_recommend_defaults fills neutral values before scoring.
+        return bool(self.sectors)
 
 
 @dataclass(frozen=True)

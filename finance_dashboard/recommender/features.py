@@ -53,14 +53,41 @@ def _neutral_sentiment(ticker: str) -> float:
     return 0.0
 
 
-def _yfinance_fundamentals(ticker: str) -> dict[str, float]:
-    import yfinance as yf
+def _sec_fundamentals(ticker: str) -> dict[str, float]:
+    """SEC-sourced fundamentals: YoY revenue growth and net profit margin.
 
-    info = yf.Ticker(ticker).info or {}
-    return {
-        "beta": float(info.get("beta") or "nan"),
-        "trailing_pe": float(info.get("trailingPE") or "nan"),
-    }
+    Both are derived from the two most-recent fiscal periods in the issuer's
+    SEC income statement (via EdgarTools). Returns NaN for either value when
+    the filing lacks the needed line item — the feature matrix' median-fill
+    pass keeps clustering stable in that case.
+    """
+    from finance_dashboard.assistant.financials import (
+        FinancialsUnavailableError,
+        fetch_company_memo,
+    )
+
+    try:
+        memo = fetch_company_memo(ticker)
+    except FinancialsUnavailableError as exc:
+        raise RuntimeError(f"SEC fundamentals unavailable for {ticker}: {exc}") from exc
+
+    years = memo.years[:2]
+    revenue_row = memo.income_statement.get("Revenue", {})
+    net_income_row = memo.income_statement.get("Net Income", {})
+
+    growth: float = float("nan")
+    margin: float = float("nan")
+    if len(years) >= 2:
+        latest, prev = years[0], years[1]
+        rev_latest = revenue_row.get(latest)
+        rev_prev = revenue_row.get(prev)
+        if rev_latest and rev_prev:
+            growth = float(rev_latest / rev_prev - 1.0)
+        ni_latest = net_income_row.get(latest)
+        if rev_latest and ni_latest is not None:
+            margin = float(ni_latest / rev_latest)
+
+    return {"revenue_growth": growth, "profit_margin": margin}
 
 
 class FeatureProvider:
@@ -76,7 +103,7 @@ class FeatureProvider:
         fundamentals_lookup: Callable[[str], dict[str, float]] | None = None,
         sentiment_lookup: Callable[[str], float] | None = None,
     ):
-        self._fundamentals = fundamentals_lookup or _yfinance_fundamentals
+        self._fundamentals = fundamentals_lookup or _sec_fundamentals
         self._sentiment = sentiment_lookup or _neutral_sentiment
 
     def compute(

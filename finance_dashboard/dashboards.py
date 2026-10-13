@@ -83,6 +83,9 @@ class PriceMetricsDashboard(BaseDashboard):
     def display(self, tickers: list[str], period_label: str, **kwargs) -> None:
         period = self.validate(tickers, period_label)
         ticker = tickers[0]
+        # Optional per-caller prefix so the same ticker rendered from multiple
+        # tabs (e.g. Prices + Watchlist detail) doesn't collide on plotly keys.
+        key_prefix = kwargs.get("key_prefix", "price-")
 
         with st.spinner(f"Loading {ticker}…"):
             hist = fetch_history((ticker,), period)
@@ -107,6 +110,7 @@ class PriceMetricsDashboard(BaseDashboard):
             fig_price_history(hist, f"{ticker} — price history"),
             use_container_width=True,
             config={"displayModeBar": False},
+            key=f"{key_prefix}hist-{ticker}",
         )
 
         cum_pct = (hist / hist.iloc[0] - 1.0) * 100
@@ -114,6 +118,7 @@ class PriceMetricsDashboard(BaseDashboard):
             fig_pct_change(cum_pct, f"{ticker} — cumulative % change"),
             use_container_width=True,
             config={"displayModeBar": False},
+            key=f"{key_prefix}pct-{ticker}",
         )
 
         roll = rolling_annualized_volatility(rets)
@@ -121,6 +126,7 @@ class PriceMetricsDashboard(BaseDashboard):
             fig_rolling_vol(roll, f"{ticker} — rolling volatility ({ROLLING_WINDOW}-day)"),
             use_container_width=True,
             config={"displayModeBar": False},
+            key=f"{key_prefix}vol-{ticker}",
         )
 
 
