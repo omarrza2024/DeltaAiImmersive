@@ -235,11 +235,11 @@ def main() -> None:
             gap:0; border-bottom:1px solid #1E2027; background:transparent;
         }
         .stTabs [data-baseweb="tab"] {
-            padding:0.55rem 1.1rem !important;
+            padding:0.85rem 1.5rem !important;
             font-family:"Inter", sans-serif !important;
-            font-size:0.72rem !important;
+            font-size:0.88rem !important;
             font-weight:600 !important;
-            letter-spacing:0.12em !important;
+            letter-spacing:0.08em !important;
             text-transform:uppercase !important;
             color:#6B7280 !important;
             border-right:1px solid #1E2027;
@@ -250,7 +250,7 @@ def main() -> None:
             color:var(--accent, #3B82F6) !important;
             background:#0E1015 !important;
             border-top:2px solid var(--accent, #3B82F6) !important;
-            padding-top:calc(0.55rem - 2px) !important;
+            padding-top:calc(0.85rem - 2px) !important;
         }
         .stTabs [data-baseweb="tab-highlight"] { display:none !important; }
 

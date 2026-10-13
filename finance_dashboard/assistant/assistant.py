@@ -115,12 +115,21 @@ of the recommended stocks. Use it to do fundamental analysis IN PLAIN ENGLISH:
   they need to run the business — that's a healthy sign") rather than reciting every number
 - Highlight the SIGNAL, not the raw numbers
 
+If the message includes a `[News sentiment — EXACT numbers, cite these when the user asks]`
+block, those are real marketaux-sourced scores — USE THEM VERBATIM:
+- When the user asks about market sentiment, QUOTE the exact average score for each
+  relevant ticker (e.g. "AAPL is sitting at +0.234, positive across 3 articles") — don't
+  round aggressively, don't invent, don't say "roughly" when you have the number.
+- Say Positive / Negative / Neutral using the label the context gives you.
+- You do NOT need to list the article URLs in your prose — the UI shows them below your
+  message in an expander — but you may name one headline if it illustrates a point.
+
 If they want new/different recommendations, tell them to name the constraint they want
 changed (e.g. "higher return target", "different sector") — do not invent numbers.
 If they're just chatting, chat naturally and briefly. Push back on hallucinations.
 
-Do NOT invent price, return, or volatility figures beyond what's in the context.
-Under 180 words. End with: "Historical data does not guarantee future returns."
+Do NOT invent price, return, volatility, or sentiment figures beyond what's in the context.
+Under 200 words. End with: "Historical data does not guarantee future returns."
 """
 
 # Words that suggest a fundamental-analysis question (used to decide whether
@@ -129,6 +138,15 @@ _FUNDAMENTAL_KEYWORDS = (
     "fundamental", "financial", "revenue", "profit", "earnings", "cash flow",
     "balance sheet", "debt", "margin", "10-k", "10-q", "sec", "filing",
     "healthy", "growing", "grow", "sales", "book value",
+)
+
+# Words that suggest a news / sentiment question. When these appear, we fetch
+# marketaux sentiment for every recommended ticker and inject the exact scores
+# plus the contributing article URLs into the LLM's system context.
+_SENTIMENT_KEYWORDS = (
+    "sentiment", "news", "article", "articles", "headline", "headlines",
+    "buzz", "coverage", "chatter", "press", "media", "reaction", "mood",
+    "feeling", "vibe", "hype", "bullish", "bearish",
 )
 
 
@@ -234,6 +252,56 @@ def _tickers_for_sec_context(user_message: str, recs: list[Recommendation]) -> l
     return []
 
 
+def _user_asked_about_sentiment(message: str) -> bool:
+    """True when the user is asking about news / market sentiment."""
+    low = (message or "").lower()
+    return any(kw in low for kw in _SENTIMENT_KEYWORDS)
+
+
+def _tickers_for_sentiment_context(
+    user_message: str, recs: list[Recommendation]
+) -> list[str]:
+    """Which recommended tickers get a fresh sentiment pull this turn.
+
+    - If the user named specific tickers → those (cap 5).
+    - Else if the message is sentiment-flavored → every recommended ticker.
+    - Else nothing (keeps the API quota and context compact).
+    """
+    if not recs:
+        return []
+    rec_tickers = [r.stock.ticker for r in recs]
+    upper = user_message.upper()
+    mentioned = [t for t in rec_tickers if t in upper]
+    if mentioned:
+        return mentioned[:5]
+    if _user_asked_about_sentiment(user_message):
+        return rec_tickers[:5]
+    return []
+
+
+def _format_sentiment_context(ticker_results: dict[str, SentimentResult]) -> str:
+    """Pack precise marketaux numbers + article URLs into the LLM system block."""
+    if not ticker_results:
+        return ""
+    lines = ["[News sentiment — EXACT numbers, cite these when the user asks]"]
+    for ticker, result in ticker_results.items():
+        if result.article_count == 0:
+            lines.append(f"- {ticker}: no articles returned (score 0.000, neutral).")
+            continue
+        lines.append(
+            f"- {ticker}: avg sentiment {result.avg_score:+.3f} "
+            f"({result.label}) across {result.article_count} article"
+            f"{'s' if result.article_count != 1 else ''}:"
+        )
+        for article in getattr(result, "articles", ()) or ():
+            date = (article.published_at or "")[:10]
+            lines.append(
+                f"    • {article.title} ({article.source or 'unknown source'}, "
+                f"{date}, score {article.score:+.2f}) {article.url}"
+            )
+    return "\n".join(lines)
+
+
 def _goal_materially_changed(before: InvestmentGoal, after: InvestmentGoal) -> bool:
     """True when a re-recommendation would produce different results."""
     return (
@@ -270,6 +338,9 @@ class AssistantReply:
     message: str
     recommendations: list[Recommendation] = field(default_factory=list)
     no_perfect_match: bool = False
+    # Per-ticker marketaux results from this turn — used by the UI to render
+    # an "articles used" expander. Empty on non-sentiment turns.
+    sentiment: dict[str, SentimentResult] = field(default_factory=dict)
 
 
 class InvestmentAssistant:
@@ -378,6 +449,16 @@ class InvestmentAssistant:
         if sec_blocks:
             sec_context = "[SEC context — use this for fundamental analysis]\n" + "\n\n".join(sec_blocks)
 
+        # Fresh sentiment pull when the user asks about news / sentiment.
+        sent_tickers = _tickers_for_sentiment_context(last_user_msg, state.last_recommendations)
+        sentiment_results: dict[str, SentimentResult] = {}
+        for ticker in sent_tickers:
+            try:
+                sentiment_results[ticker] = fetch_sentiment(ticker)
+            except Exception:
+                continue
+        sentiment_context = _format_sentiment_context(sentiment_results)
+
         watchlists_summary = get_watchlists_summary(state.username)
 
         try:
@@ -389,6 +470,7 @@ class InvestmentAssistant:
                         "[User's watchlists — tickers they're tracking]\n" + watchlists_summary}]
                       if watchlists_summary else []),
                     *([{"role": "system", "content": sec_context}] if sec_context else []),
+                    *([{"role": "system", "content": sentiment_context}] if sentiment_context else []),
                     *state.messages[-6:],
                 ],
             )
@@ -398,7 +480,7 @@ class InvestmentAssistant:
         if DISCLAIMER.lower() not in reply.lower():
             reply = f"{reply.rstrip()}\n\n_{DISCLAIMER}_"
         state.messages.append({"role": "assistant", "content": reply})
-        return AssistantReply(message=reply)
+        return AssistantReply(message=reply, sentiment=sentiment_results)
 
     def _recommend(self, state: AssistantState) -> AssistantReply:
         goal = state.goal

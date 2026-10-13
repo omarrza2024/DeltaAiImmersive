@@ -327,19 +327,46 @@ def _render_article_list(result: SentimentResult) -> None:
         st.divider()
 
 
+def _friendly_sentiment_error(raw: str) -> str:
+    """Translate a marketaux error string into something a user can read."""
+    low = (raw or "").lower()
+    if "usage_limit" in low or ("limit" in low and "reach" in low):
+        return (
+            "News updates are paused right now — our free news service has "
+            "hit today's limit. Please check back tomorrow."
+        )
+    if "api_key" in low or "api key" in low or "missing" in low:
+        return (
+            "News sentiment isn't set up yet. The news service needs an API "
+            "key — ask an administrator to configure it."
+        )
+    if "network" in low or "timeout" in low or "connection" in low:
+        return (
+            "We couldn't reach the news service. This is usually a temporary "
+            "connection issue — try again in a minute."
+        )
+    if "http 429" in low or "rate" in low:
+        return (
+            "The news service is a bit busy right now. Give it a moment, then "
+            "try again."
+        )
+    return (
+        "News sentiment is temporarily unavailable. Please try again later."
+    )
+
+
 def _render_sentiment_panel(tickers: list[str]) -> None:
     """Show average marketaux sentiment per ticker — one call each, cached 30 min."""
     if not tickers:
         return
-    st.markdown(f"## News sentiment (latest {NEWS_LIMIT} articles each)")
+    st.markdown("## News sentiment")
     st.caption(
-        "Pulled live from marketaux. Score is the mean of each article's entity "
-        "sentiment score for this ticker — range [-1, 1]. "
-        "The free marketaux tier caps results at **3 articles per request**, so "
-        "the shown count may be lower than the requested 10."
+        "Pulled live from the news service. Score is the average mood of recent "
+        "articles for each ticker — closer to +1 is more positive, closer to −1 "
+        "is more negative. Up to **3 articles per ticker** are included."
     )
 
-    with st.spinner("Fetching latest news from marketaux…"):
+    with st.spinner("Fetching latest news…"):
         results: list[SentimentResult] = []
         errors: list[tuple[str, str]] = []
         for ticker in tickers:
@@ -349,8 +376,8 @@ def _render_sentiment_panel(tickers: list[str]) -> None:
                 errors.append((ticker, str(exc)))
 
     if errors and not results:
-        # Hard failure — API key missing, network down, etc. Show once, not per-ticker.
-        st.error(f"News sentiment unavailable: {errors[0][1]}")
+        # Hard failure — translate to plain English before showing.
+        st.warning(_friendly_sentiment_error(errors[0][1]))
         return
 
     # Rank cards by avg sentiment DESC so the most positive news surfaces at
@@ -372,6 +399,6 @@ def _render_sentiment_panel(tickers: list[str]) -> None:
                     _render_article_list(result)
 
     if errors:
-        with st.expander(f"Tickers with no sentiment data ({len(errors)})"):
+        with st.expander(f"Tickers with no news data ({len(errors)})"):
             for ticker, reason in errors:
-                st.write(f"**{ticker}** — {reason}")
+                st.write(f"**{ticker}** — {_friendly_sentiment_error(reason)}")

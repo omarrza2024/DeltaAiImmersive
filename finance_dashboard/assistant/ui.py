@@ -131,12 +131,52 @@ def _render_card(rank: int, rec: Recommendation) -> None:
 
 
 def _render_recommendations(reply: AssistantReply) -> None:
-    if not reply.recommendations:
+    if reply.recommendations:
+        if reply.no_perfect_match:
+            st.warning("No stocks fully match your constraints — showing the closest matches.")
+        for i, rec in enumerate(reply.recommendations, start=1):
+            _render_card(i, rec)
+    # Sentiment answers (no new recommendations) still get their article list.
+    _render_sentiment_articles(reply)
+
+
+def _render_sentiment_articles(reply: AssistantReply) -> None:
+    """One expander per ticker with the exact articles behind the sentiment
+    number — same pattern as the Recommender tab's sentiment panel."""
+    sentiment = getattr(reply, "sentiment", None) or {}
+    if not sentiment:
         return
-    if reply.no_perfect_match:
-        st.warning("No stocks fully match your constraints — showing the closest matches.")
-    for i, rec in enumerate(reply.recommendations, start=1):
-        _render_card(i, rec)
+    st.markdown("#### News sentiment sources")
+    for ticker, result in sentiment.items():
+        articles = getattr(result, "articles", ()) or ()
+        header = (
+            f"**{ticker}** · {result.label} ({result.avg_score:+.3f}) · "
+            f"{result.article_count} article"
+            f"{'s' if result.article_count != 1 else ''}"
+        )
+        with st.expander(header):
+            if not articles:
+                st.caption("No articles were returned by marketaux for this ticker.")
+                continue
+            for article in articles:
+                meta_bits: list[str] = []
+                if article.source:
+                    meta_bits.append(article.source)
+                if article.published_at:
+                    meta_bits.append(article.published_at[:10])
+                meta_bits.append(f"score {article.score:+.3f}")
+                meta = " · ".join(meta_bits)
+                title_md = (
+                    f"**[{article.title}]({article.url})**"
+                    if article.url else f"**{article.title}**"
+                )
+                st.markdown(f"{title_md}  \n_{meta}_")
+                if article.description:
+                    st.caption(article.description)
+                st.divider()
+
+
+_PENDING_PROMPT_KEY = "_assistant_pending_prompt"
 
 
 def render_assistant_tab() -> None:
@@ -156,7 +196,7 @@ def render_assistant_tab() -> None:
     assistant = _init_state()
     _, state = st.session_state[_STATE_KEY]
 
-    # 1) Render every message top-to-bottom (grows upward as history piles on).
+    # 1) Render all finished history top-to-bottom.
     for role, content, reply in st.session_state[_HISTORY_KEY]:
         avatar = _USER_AVATAR if role == "user" else _BOT_AVATAR
         with st.chat_message(role, avatar=avatar):
@@ -164,42 +204,46 @@ def render_assistant_tab() -> None:
             if reply is not None:
                 _render_recommendations(reply)
 
-    # 2) Input pinned at the bottom of the tab, below all history.
-    prompt = st.chat_input("Type your answer or ask a follow-up…")
-    if not prompt:
-        return
-
-    # 3) Handle the turn:
-    #    a) Render the user's message and a "typing…" bubble *right now* so
-    #       there's no dead air while Groq responds.
-    #    b) Persist user message.
-    #    c) Call the LLM.
-    #    d) Clear the typing bubble, persist assistant reply, then rerun so
-    #       the full history re-renders cleanly above the input.
-    with st.chat_message("user", avatar=_USER_AVATAR):
-        st.markdown(prompt)
-    typing_placeholder = st.empty()
-    with typing_placeholder.container():
+    # 2) If a prompt is pending (the user just hit Enter and we rerendered
+    #    before calling the LLM), show their message + the typing dots.
+    #    Rendered BEFORE chat_input so they visually appear above the input.
+    pending = st.session_state.get(_PENDING_PROMPT_KEY)
+    if pending:
+        with st.chat_message("user", avatar=_USER_AVATAR):
+            st.markdown(pending)
         with st.chat_message("assistant", avatar=_BOT_AVATAR):
             st.markdown(
                 '<div class="typing-indicator"><span></span><span></span><span></span></div>',
                 unsafe_allow_html=True,
             )
 
-    st.session_state[_HISTORY_KEY].append(("user", prompt, None))
+    # 3) Chat input is always rendered LAST so Streamlit pins it to the bottom
+    #    of the tab, below the user's just-sent message and the typing dots.
+    prompt = st.chat_input("Type your answer or ask a follow-up…")
+    if prompt and not pending:
+        # Stash the prompt and rerun to display it immediately — the next
+        # render will take the "pending" branch above and show user+dots.
+        st.session_state[_PENDING_PROMPT_KEY] = prompt
+        st.rerun()
+
+    if not pending:
+        return
+
+    # 4) Pending path: generate the reply, persist both messages, drop the
+    #    pending marker, and rerun so the full history replays cleanly.
+    st.session_state[_HISTORY_KEY].append(("user", pending, None))
     db = get_db()
     username = current_user()
-    chat_id = ensure_chat(db, username, first_message=prompt) if (db is not None and username) else None
+    chat_id = ensure_chat(db, username, first_message=pending) if (db is not None and username) else None
     if db is not None and username and chat_id is not None:
         try:
-            chats.append_message(db, username, chat_id, role="user", content=prompt)
+            chats.append_message(db, username, chat_id, role="user", content=pending)
         except Exception:
             pass  # persistence failure must not break the chat itself
 
     try:
-        reply = assistant.handle_message(state, prompt)
+        reply = assistant.handle_message(state, pending)
     except LLMUnavailableError as exc:
-        typing_placeholder.empty()
         message = f"⚠️ The AI service failed: {exc}. Please try again."
         st.session_state[_HISTORY_KEY].append(("assistant", message, None))
         if db is not None and username and chat_id is not None:
@@ -207,13 +251,14 @@ def render_assistant_tab() -> None:
                 chats.append_message(db, username, chat_id, role="assistant", content=message)
             except Exception:
                 pass
+        st.session_state.pop(_PENDING_PROMPT_KEY, None)
         st.rerun()
 
-    typing_placeholder.empty()
     st.session_state[_HISTORY_KEY].append(("assistant", reply.message, reply))
     if db is not None and username and chat_id is not None:
         try:
             chats.append_message(db, username, chat_id, role="assistant", content=reply.message)
         except Exception:
             pass
+    st.session_state.pop(_PENDING_PROMPT_KEY, None)
     st.rerun()
