@@ -22,7 +22,7 @@ from finance_dashboard.assistant.llm import get_api_key
 from finance_dashboard.assistant.models import Recommendation
 from finance_dashboard.auth import chats
 from finance_dashboard.auth.db import get_db
-from finance_dashboard.auth.ui import current_user, ensure_chat
+from finance_dashboard.auth.ui import current_user, ensure_chat, is_guest, render_signin_gate
 from finance_dashboard.data import company_name, fetch_history
 from finance_dashboard.recommender.models import RiskLabel
 
@@ -180,6 +180,18 @@ _PENDING_PROMPT_KEY = "_assistant_pending_prompt"
 
 
 def render_assistant_tab() -> None:
+    # The Investment Assistant is LOCKED for guests — it burns Groq API
+    # credits per message and relies on the signed-in user's chat history
+    # and preferences, so sign-in is mandatory. The gate reads like a
+    # normal sign-in page; no "trial" language.
+    if is_guest():
+        render_signin_gate(
+            headline="Sign in to use the Investment Assistant",
+            subcopy="The AI chat is only available to signed-in users. "
+                    "Create a free account to save your chats and preferences.",
+        )
+        return
+
     st.markdown(
         "Chat with an AI assistant that asks about your goals, then uses the "
         "recommender's real calculations to suggest matching stocks."

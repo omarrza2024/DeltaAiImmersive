@@ -66,15 +66,59 @@ def is_authenticated() -> bool:
     return current_user() is not None
 
 
+_GUEST_USERNAME = "__guest__"
+
+
+def is_guest() -> bool:
+    """True when the session has no real sign-in (free-browse mode)."""
+    return current_user() == _GUEST_USERNAME
+
+
 def require_login() -> str | None:
-    """Render login/signup gate. Returns username if logged in, else None (caller stops)."""
+    """Free-browse gate.
+
+    Signed-in users get their real username. Everyone else gets a transparent
+    guest session — Prices, Compare, Correlation, Recommender (minus the
+    API-backed Sentiment option), and Watchlist all work. Features that cost
+    API credits (Investment Assistant, Sentiment, SEC fundamentals) show the
+    sign-in gate when a guest tries to use them.
+
+    EXCEPTION: when the sidebar "Sign in" button sets _force_signin, this
+    renders the gate at the top of the page and returns None so the caller
+    stops rendering the app body.
+    """
     _restore_from_url()
-    if is_authenticated():
+    if is_authenticated() and not is_guest():
+        st.session_state.pop("_force_signin", None)
         return current_user()
 
-    st.markdown("### Sign in to TradeMatrix")
-    st.caption("Your chats, colors, and investment preferences are saved to your account.")
+    if st.session_state.get("_force_signin"):
+        st.session_state.pop(_USER_KEY, None)
+        render_signin_gate(
+            headline="Sign in to TradeMatrix",
+            subcopy="Your watchlists, chats, and preferences are saved to your account.",
+        )
+        if st.button("← Back to the app", key="_back_to_guest"):
+            st.session_state.pop("_force_signin", None)
+            st.rerun()
+        return None
 
+    # Default: silent guest session. No banner, no counter — API-dependent
+    # features own their own gates, everything else just works.
+    st.session_state[_USER_KEY] = _GUEST_USERNAME
+    return _GUEST_USERNAME
+
+
+def render_signin_gate(
+    headline: str = "Create an account to continue",
+    subcopy: str = "Sign in or sign up — it's free, and your watchlists, chats, "
+                   "and preferences stay with your account.",
+) -> None:
+    """A clean, professional sign-in / sign-up page.
+
+    Shown by API-dependent tabs (Investment Assistant) when a guest tries to
+    use them. No "trial" language — reads like any normal sign-in page.
+    """
     db = get_db()
     if db is None:
         st.error(
@@ -82,7 +126,10 @@ def require_login() -> str | None:
             "to `.streamlit/secrets.toml`, then rerun the app. Auth is disabled "
             "until then to prevent unauthenticated access."
         )
-        return None
+        return
+
+    st.markdown(f"### {headline}")
+    st.caption(subcopy)
 
     tab_login, tab_signup = st.tabs(["Log in", "Sign up"])
 
@@ -118,8 +165,6 @@ def require_login() -> str | None:
                 except UserInputError as exc:
                     st.error(str(exc))
 
-    return None
-
 
 def render_sidebar_account_panel() -> tuple[str, str]:
     """Sidebar: welcome banner, chats list, profile editor, logout.
@@ -129,6 +174,22 @@ def render_sidebar_account_panel() -> tuple[str, str]:
     username = current_user()
     db = get_db()
     if db is None or username is None:
+        return "#00E676", "#FF3B30"
+
+    # Guest sidebar: just a subtle Sign in button + a sign-up nudge, no
+    # Mongo account calls. Comparison-chart colors default to semantic
+    # green / red so the Compare tab lines read as gain / loss.
+    if is_guest():
+        st.session_state.setdefault("gain_color", "#00E676")
+        st.session_state.setdefault("loss_color", "#FF3B30")
+        with st.sidebar:
+            if st.button("Sign in", use_container_width=True, key="guest_signin_cta"):
+                st.session_state["_force_signin"] = True
+                st.rerun()
+            st.caption(
+                "Create a free account to save your watchlists, chats, "
+                "and preferences across sessions."
+            )
         return "#00E676", "#FF3B30"
 
     profile = profiles.get_or_create(db, username)

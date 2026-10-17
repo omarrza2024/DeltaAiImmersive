@@ -20,9 +20,15 @@ from finance_dashboard.models import (
 )
 from finance_dashboard.assistant.ui import render_assistant_tab
 from finance_dashboard.auth.ui import (
+    is_guest,
     render_sidebar_account_panel,
     require_login,
 )
+
+# Features that cost API credits or depend on third-party services. For
+# guests these appear in the UI but can't be selected — a subtle sign-up
+# nudge explains why. Signing in unlocks them.
+_API_GATED_FEATURES = {"Sentiment"}
 from finance_dashboard.watchlist.ui import render_watchlist_tab
 from finance_dashboard.recommender.models import FeatureName, RecommendationRequest, StrategyName
 from finance_dashboard.recommender.universe import ETF_FALLBACK_HOLDINGS, PREDEFINED_UNIVERSES
@@ -133,10 +139,24 @@ def _render_recommender_tab(controller: VisualizationController, default_period:
     # Features selector OUTSIDE the form so the time-range widget can hide
     # itself when the user picks only time-independent features (Fundamentals
     # or Sentiment — those read SEC filings / news, which aren't period-based).
+    #
+    # For guests, API-gated features (Sentiment) are stripped from the list —
+    # they appear as a disabled note instead so a random visitor can't burn
+    # the marketaux quota. A subtle sign-up nudge sits next to the control.
+    guest = is_guest()
+    available_labels = [
+        label for label in _FEATURE_LABELS
+        if not (guest and label in _API_GATED_FEATURES)
+    ]
     features = st.multiselect(
-        "Features", list(_FEATURE_LABELS), default=["Volatility", "Returns"],
+        "Features", available_labels, default=["Volatility", "Returns"],
         key="recommender_features",
     )
+    if guest:
+        locked = ", ".join(sorted(_API_GATED_FEATURES))
+        st.caption(
+            f"🔒 **{locked}** uses a live news API — [sign in](#sign-in) to unlock it."
+        )
     _TIME_DEPENDENT = {"Volatility", "Returns", "SMA", "MACD"}
     needs_time_range = any(f in _TIME_DEPENDENT for f in features)
 
@@ -230,11 +250,20 @@ def main() -> None:
         }
         .term-meta span.dot { color:#22C55E; margin-right:0.3rem; }
 
-        /* === TABS: terminal-style bracketed labels === */
-        .stTabs [data-baseweb="tab-list"] {
-            gap:0; border-bottom:1px solid #1E2027; background:transparent;
+        /* === TABS: terminal-style bracketed labels ===
+           Streamlit's tab DOM is a moving target across releases, so match
+           every selector it has shipped recently: baseweb attributes, ARIA
+           roles, and the stTabs test-id. Each rule carries !important so the
+           app theme can't win against our styling. */
+        .stTabs [data-baseweb="tab-list"],
+        [data-testid="stTabs"] [role="tablist"] {
+            gap:0 !important;
+            border-bottom:1px solid #1E2027 !important;
+            background:transparent !important;
         }
-        .stTabs [data-baseweb="tab"] {
+        .stTabs [data-baseweb="tab"],
+        [data-testid="stTabs"] button[role="tab"],
+        .stTabs button[role="tab"] {
             padding:0.85rem 1.5rem !important;
             font-family:"Inter", sans-serif !important;
             font-size:0.88rem !important;
@@ -242,15 +271,36 @@ def main() -> None:
             letter-spacing:0.08em !important;
             text-transform:uppercase !important;
             color:#6B7280 !important;
-            border-right:1px solid #1E2027;
-            background:transparent;
+            border-right:1px solid #1E2027 !important;
+            background:transparent !important;
         }
-        .stTabs [data-baseweb="tab"]:hover { color:#E8ECEF !important; background:#0E1015; }
-        .stTabs [aria-selected="true"] {
+        .stTabs [data-baseweb="tab"] p,
+        [data-testid="stTabs"] button[role="tab"] p,
+        .stTabs button[role="tab"] p {
+            /* Streamlit wraps the tab label in a <p> whose own typography
+               would otherwise override the parent rules above. */
+            font-size:0.88rem !important;
+            font-weight:600 !important;
+            letter-spacing:0.08em !important;
+            text-transform:uppercase !important;
+            margin:0 !important;
+        }
+        .stTabs [data-baseweb="tab"]:hover,
+        [data-testid="stTabs"] button[role="tab"]:hover,
+        .stTabs button[role="tab"]:hover {
+            color:#E8ECEF !important; background:#0E1015 !important;
+        }
+        .stTabs [aria-selected="true"],
+        [data-testid="stTabs"] button[role="tab"][aria-selected="true"],
+        .stTabs button[role="tab"][aria-selected="true"] {
             color:var(--accent, #3B82F6) !important;
             background:#0E1015 !important;
             border-top:2px solid var(--accent, #3B82F6) !important;
             padding-top:calc(0.85rem - 2px) !important;
+        }
+        .stTabs [aria-selected="true"] p,
+        [data-testid="stTabs"] button[role="tab"][aria-selected="true"] p {
+            color:var(--accent, #3B82F6) !important;
         }
         .stTabs [data-baseweb="tab-highlight"] { display:none !important; }
 
