@@ -17,65 +17,8 @@ from finance_dashboard.auth.db import get_db
 from finance_dashboard.auth.ui import current_user
 from finance_dashboard.config import PERIOD_OPTIONS
 from finance_dashboard.data import company_name, fetch_history
-from finance_dashboard.recommender.universe import (
-    ETF_FALLBACK_HOLDINGS,
-    PREDEFINED_UNIVERSES,
-)
 from finance_dashboard.watchlist import store
-
-# Shared ticker universe for autocomplete suggestions. Deduped across the
-# ETF holdings and curated sector universes we already use elsewhere.
-_POPULAR_TICKERS: list[str] = sorted(
-    {t for ts in ETF_FALLBACK_HOLDINGS.values() for t in ts}
-    | {t for ts in PREDEFINED_UNIVERSES.values() for t in ts}
-)
-
-
-def ticker_prefix_autocomplete(
-    label: str,
-    key: str,
-    *,
-    options: list[str] | None = None,
-    placeholder: str = "",
-    max_suggestions: int = 8,
-) -> str:
-    """Text input with STARTS-WITH autocomplete suggestions underneath.
-
-    Shows suggestions only once the user types ≥1 character. Only tickers that
-    begin with that prefix are shown (case-insensitive). Clicking a suggestion
-    fills the input with the ticker.
-
-    Returns the current input value (the user may also type a custom ticker
-    that isn't in `options` — e.g. a ticker we don't know about).
-    """
-    opts = options if options is not None else _POPULAR_TICKERS
-    input_key = f"_tx_{key}"
-
-    typed = st.text_input(
-        label,
-        key=input_key,
-        placeholder=placeholder,
-        label_visibility="collapsed",
-    )
-
-    prefix = (typed or "").strip().upper()
-    if prefix:
-        matches = [o for o in opts if o.upper().startswith(prefix)]
-        # If the user has already typed the exact match, no need to suggest it.
-        matches = [m for m in matches if m.upper() != prefix][:max_suggestions]
-        if matches:
-            chip_cols = st.columns(min(len(matches), 4))
-            for i, match in enumerate(matches):
-                with chip_cols[i % 4]:
-                    if st.button(
-                        match,
-                        key=f"_sugg_{key}_{match}",
-                        type="tertiary",
-                        use_container_width=True,
-                    ):
-                        st.session_state[input_key] = match
-                        st.rerun()
-    return typed
+from finance_dashboard.widgets import POPULAR_TICKERS, ticker_prefix_autocomplete
 
 _INDICES = [
     ("SPY", "S&P 500"),
@@ -602,6 +545,7 @@ def _render_watchlist(wl: dict, username: str, db) -> None:
                 "Add a ticker",
                 key=f"wl-add-{wid}",
                 placeholder="Add a ticker (type a letter to see suggestions)",
+                label_visibility="collapsed",
             )
         if add_c2.button("Add", key=f"addbtn-{wid}", use_container_width=True):
             try:

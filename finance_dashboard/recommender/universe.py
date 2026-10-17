@@ -9,17 +9,38 @@ from finance_dashboard.recommender.models import RecommendationRequest
 
 # Static fallbacks: live holdings via yfinance are preferred, but frequently
 # return partial or empty data, so every supported ETF needs an offline list.
+# Keys cover the major market-cap indices (SPY/QQQ/DIA/IWM/VTI/VOO) and the
+# full set of Select Sector SPDR ETFs so a user can pick any slice they want.
 ETF_FALLBACK_HOLDINGS: dict[str, list[str]] = {
-    "XLK": ["AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "CSCO", "AMD", "ADBE", "ACN",
-            "IBM", "INTU", "NOW", "TXN", "QCOM"],
-    "XLV": ["LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "AMGN", "ISRG", "DHR",
-            "PFE", "VRTX", "SYK", "BSX", "GILD"],
-    "XLF": ["BRK-B", "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "SPGI", "AXP",
-            "BLK", "C", "SCHW", "CB", "PGR"],
-    "QQQ": ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "COST", "NFLX",
-            "AMD", "PEP", "ADBE", "CSCO", "INTU"],
-    "SPY": ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "BRK-B", "LLY", "JPM", "UNH",
-            "XOM", "V", "JNJ", "PG", "HD"],
+    # --- Broad-market / major indices ---
+    "SPY":  ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "BRK-B", "LLY", "JPM", "UNH",
+             "XOM", "V", "JNJ", "PG", "HD"],
+    "VOO":  ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "BRK-B", "LLY", "JPM", "UNH"],
+    "QQQ":  ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "COST", "NFLX",
+             "AMD", "PEP", "ADBE", "CSCO", "INTU"],
+    "DIA":  ["UNH", "GS", "MSFT", "HD", "CRM", "V", "MCD", "CAT", "AXP", "AMGN",
+             "SHW", "TRV", "HON", "IBM", "JPM"],
+    "IWM":  ["SMCI", "STRL", "ANF", "FTAI", "APPF", "ONTO", "MLI", "FLR", "FIX", "RMBS"],
+    "VTI":  ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "BRK-B", "LLY", "JPM"],
+    # --- SPDR Select Sector ETFs ---
+    "XLK":  ["AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "CSCO", "AMD", "ADBE", "ACN",
+             "IBM", "INTU", "NOW", "TXN", "QCOM"],
+    "XLV":  ["LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "AMGN", "ISRG", "DHR",
+             "PFE", "VRTX", "SYK", "BSX", "GILD"],
+    "XLF":  ["BRK-B", "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "SPGI", "AXP",
+             "BLK", "C", "SCHW", "CB", "PGR"],
+    "XLE":  ["XOM", "CVX", "COP", "EOG", "SLB", "MPC", "PSX", "OXY", "WMB", "VLO"],
+    "XLY":  ["AMZN", "TSLA", "HD", "MCD", "BKNG", "NKE", "LOW", "SBUX", "TJX", "ABNB"],
+    "XLP":  ["WMT", "PG", "COST", "KO", "PEP", "PM", "MDLZ", "MO", "CL", "TGT"],
+    "XLI":  ["GE", "CAT", "RTX", "HON", "UNP", "BA", "DE", "UPS", "LMT", "ETN"],
+    "XLU":  ["NEE", "SO", "DUK", "SRE", "AEP", "D", "EXC", "XEL", "ED", "PCG"],
+    "XLC":  ["META", "GOOGL", "GOOG", "NFLX", "DIS", "VZ", "T", "CMCSA", "EA", "TTWO"],
+    "XLRE": ["PLD", "AMT", "EQIX", "WELL", "SPG", "DLR", "O", "PSA", "CCI", "EXR"],
+    "XLB":  ["LIN", "SHW", "ECL", "APD", "FCX", "NEM", "CTVA", "DD", "NUE", "DOW"],
+    # --- Vanguard industry ETFs ---
+    "VGT":  ["AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "CSCO", "AMD", "ADBE", "ACN"],
+    "VHT":  ["LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "AMGN", "ISRG", "DHR"],
+    "VFH":  ["BRK-B", "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "SPGI", "AXP"],
 }
 
 # Sector universes drawn from across the supported ETFs; selectable without an ETF.

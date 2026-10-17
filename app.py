@@ -24,6 +24,7 @@ from finance_dashboard.auth.ui import (
     render_sidebar_account_panel,
     require_login,
 )
+from finance_dashboard.widgets import POPULAR_TICKERS, ticker_prefix_autocomplete
 
 # Features that cost API credits or depend on third-party services. For
 # guests these appear in the UI but can't be selected — a subtle sign-up
@@ -33,13 +34,8 @@ from finance_dashboard.watchlist.ui import render_watchlist_tab
 from finance_dashboard.recommender.models import FeatureName, RecommendationRequest, StrategyName
 from finance_dashboard.recommender.universe import ETF_FALLBACK_HOLDINGS, PREDEFINED_UNIVERSES
 
-# Curated autocomplete pool for the correlation tab — every ticker we already
-# know about, deduped and sorted. Users can still add anything else via
-# multiselect's accept_new_options.
-_POPULAR_TICKERS: list[str] = sorted(
-    {t for ts in ETF_FALLBACK_HOLDINGS.values() for t in ts}
-    | {t for ts in PREDEFINED_UNIVERSES.values() for t in ts}
-)
+# Autocomplete pool is sourced from `finance_dashboard.widgets.POPULAR_TICKERS`
+# so Prices, Compare, Correlation and Watchlist all see the same ticker list.
 
 # Human-readable labels for recommender controls.
 _FEATURE_LABELS: dict[str, str] = {
@@ -72,13 +68,15 @@ def _render_default_period_selector() -> str:
 
 
 def _render_price_inputs(default_period: str) -> tuple[list[str], str]:
-    # If the user clicked a ticker in the Watchlist tab, consume the handoff
-    # value BEFORE the widget is instantiated — otherwise Streamlit raises
-    # "cannot be modified after the widget ... is instantiated".
+    # Handoff from the Watchlist tab: seed the shared autocomplete widget BEFORE
+    # it instantiates, so the clicked ticker shows up without a widget-order
+    # error.
     pending = st.session_state.pop("_wl_pending_ticker", None)
     if pending:
-        st.session_state["price_ticker"] = pending
-    ticker_raw = st.text_input("Ticker", value="AAPL", key="price_ticker")
+        st.session_state["_tx_price_ticker"] = pending
+    ticker_raw = ticker_prefix_autocomplete(
+        "Ticker", key="price_ticker", default="AAPL",
+    )
     period_label = st.selectbox(
         "Time range",
         list(PERIOD_OPTIONS.keys()),
@@ -92,9 +90,13 @@ def _render_compare_inputs(default_period: str) -> tuple[list[str], str, None]:
     st.markdown("Compare **annualized** and **rolling volatility** for two stocks.")
     c1, c2, c3 = st.columns(3)
     with c1:
-        ta = st.text_input("Stock A", value="AAPL", key="compare_a")
+        ta = ticker_prefix_autocomplete(
+            "Stock A", key="compare_a", default="AAPL",
+        )
     with c2:
-        tb = st.text_input("Stock B", value="MSFT", key="compare_b")
+        tb = ticker_prefix_autocomplete(
+            "Stock B", key="compare_b", default="MSFT",
+        )
     with c3:
         period_label = st.selectbox(
             "Time range",
@@ -112,7 +114,7 @@ def _render_correlation_inputs(default_period: str) -> tuple[list[str], str, Non
     )
     selected = st.multiselect(
         "Tickers",
-        options=_POPULAR_TICKERS,
+        options=POPULAR_TICKERS,
         default=["AAPL", "MSFT", "GOOGL"],
         accept_new_options=True,
         key="corr_tickers",
@@ -319,10 +321,17 @@ def main() -> None:
             outline:none !important;
         }
 
-        /* Selectbox: no-typing behavior kept. */
-        div[data-baseweb="select"], div[data-baseweb="select"] * { cursor: pointer !important; }
-        .stSelectbox div[data-baseweb="select"] input {
-            caret-color: transparent !important; pointer-events: none !important;
+        /* Selectbox: click to pick, never typing. Target stSelectbox
+           specifically so stMultiSelect's search-as-you-type still works
+           (used in the Correlation tab). Hide the caret + ignore keystrokes. */
+        [data-testid="stSelectbox"] div[data-baseweb="select"],
+        [data-testid="stSelectbox"] div[data-baseweb="select"] * {
+            cursor: pointer !important;
+        }
+        [data-testid="stSelectbox"] input {
+            caret-color: transparent !important;
+            pointer-events: none !important;
+            user-select: none !important;
         }
 
         /* Multiselect chips: amber tinted. */
