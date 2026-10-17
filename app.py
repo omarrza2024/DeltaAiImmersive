@@ -117,13 +117,21 @@ def _render_correlation_inputs(default_period: str) -> tuple[list[str], str, Non
         "Type to search tickers, click to add. Press Enter to add any symbol "
         "not in the list. Correlations use **daily log returns**."
     )
-    # Options show the company name alongside the ticker (AAPL — Apple Inc.).
-    # ticker_from_label strips the suffix back off when we hand tickers to
-    # the downstream dashboard.
+    # Options show the company name alongside the ticker. ticker_from_label
+    # strips the suffix back off when we hand tickers to the dashboard.
+    # Guard: Streamlit requires every `default` value to already be in
+    # `options`, so we prepend any missing default labels (can happen when
+    # ticker_labels()'s cache warmed with a bare ticker before yfinance
+    # could resolve the company name).
+    options = list(ticker_labels())
+    default_labels = [label_for_ticker(t) for t in ("AAPL", "MSFT", "GOOGL")]
+    for lbl in default_labels:
+        if lbl not in options:
+            options.append(lbl)
     selected = st.multiselect(
         "Tickers",
-        options=ticker_labels(),
-        default=[label_for_ticker(t) for t in ("AAPL", "MSFT", "GOOGL")],
+        options=options,
+        default=default_labels,
         accept_new_options=True,
         key="corr_tickers",
     )

@@ -101,11 +101,17 @@ def ticker_select(
 
     Returns the ticker symbol only — the company-name annotation is stripped.
     """
-    options = ticker_labels()
+    options = list(ticker_labels())
     default_label = label_for_ticker(default) if default else ""
-    default_list = [default_label] if default_label and default_label in options else (
-        [default_label] if default_label else []
-    )
+    # Streamlit's multiselect VALIDATES that each `default` value is already
+    # in `options` — accept_new_options only applies to what the USER types.
+    # If the cached ticker_labels() call fell back to a bare ticker (e.g.
+    # yfinance was slow when the cache warmed), label_for_ticker's fresh call
+    # may now add the company name, giving a mismatch. Prepend when missing
+    # so the picker always has a safe default to render.
+    if default_label and default_label not in options:
+        options = [default_label] + options
+    default_list = [default_label] if default_label else []
 
     selected = st.multiselect(
         label,
