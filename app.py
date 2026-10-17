@@ -315,26 +315,31 @@ def main() -> None:
         div.stTabs,
         div[data-testid="stTabs"] { width:100% !important; }
 
-        div.stTabs > div[data-baseweb="tab-list"],
-        div[data-testid="stTabs"] div[data-baseweb="tab-list"],
-        div[data-testid="stTabs"] div[role="tablist"] {
-            display:flex !important;
-            flex-direction:row !important;
-            flex-wrap:nowrap !important;
+        /* CSS Grid instead of flex — grid-auto-flow:column + grid-auto-columns:1fr
+           makes every tab share the full width equally regardless of how many
+           tabs there are. More reliable than flex:1, which Streamlit's own
+           min-width rules can defeat. html body prefix maxes specificity so
+           our rules beat Streamlit's injected stylesheet. */
+        html body div.stTabs div[data-baseweb="tab-list"],
+        html body div[data-testid="stTabs"] div[data-baseweb="tab-list"],
+        html body div[data-testid="stTabs"] div[role="tablist"] {
+            display:grid !important;
+            grid-auto-flow:column !important;
+            grid-auto-columns:1fr !important;
             width:100% !important;
             gap:0 !important;
-            overflow:hidden !important;
             border-bottom:1px solid #1E2027 !important;
             background:transparent !important;
+            overflow:hidden !important;
         }
 
-        div.stTabs button[data-baseweb="tab"],
-        div.stTabs button[role="tab"],
-        div[data-testid="stTabs"] button[data-baseweb="tab"],
-        div[data-testid="stTabs"] button[role="tab"] {
-            flex:1 1 0 !important;
+        html body div.stTabs button[data-baseweb="tab"],
+        html body div.stTabs button[role="tab"],
+        html body div[data-testid="stTabs"] button[data-baseweb="tab"],
+        html body div[data-testid="stTabs"] button[role="tab"] {
+            width:100% !important;
             min-width:0 !important;
-            width:auto !important;
+            max-width:none !important;
             display:flex !important;
             align-items:center !important;
             justify-content:center !important;
