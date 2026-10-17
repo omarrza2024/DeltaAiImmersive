@@ -24,7 +24,14 @@ from finance_dashboard.auth.ui import (
     render_sidebar_account_panel,
     require_login,
 )
-from finance_dashboard.widgets import POPULAR_TICKERS, ticker_prefix_autocomplete
+from finance_dashboard.widgets import (
+    POPULAR_TICKERS,
+    label_for_ticker,
+    ticker_from_label,
+    ticker_labels,
+    ticker_prefix_autocomplete,
+    ticker_select,
+)
 
 # Features that cost API credits or depend on third-party services. For
 # guests these appear in the UI but can't be selected — a subtle sign-up
@@ -68,14 +75,14 @@ def _render_default_period_selector() -> str:
 
 
 def _render_price_inputs(default_period: str) -> tuple[list[str], str]:
-    # Handoff from the Watchlist tab: seed the shared autocomplete widget BEFORE
-    # it instantiates, so the clicked ticker shows up without a widget-order
-    # error.
+    # Handoff from the Watchlist tab: when the user clicks a ticker row there,
+    # seed the Prices ticker-select BEFORE it instantiates so the clicked
+    # ticker shows up in the dropdown.
     pending = st.session_state.pop("_wl_pending_ticker", None)
     if pending:
-        st.session_state["_tx_price_ticker"] = pending
-    ticker_raw = ticker_prefix_autocomplete(
-        "Ticker", key="price_ticker", default="AAPL",
+        st.session_state["price_ticker_sel"] = [label_for_ticker(pending)]
+    ticker_raw = ticker_select(
+        "Ticker", key="price_ticker_sel", default="AAPL",
     )
     period_label = st.selectbox(
         "Time range",
@@ -90,13 +97,9 @@ def _render_compare_inputs(default_period: str) -> tuple[list[str], str, None]:
     st.markdown("Compare **annualized** and **rolling volatility** for two stocks.")
     c1, c2, c3 = st.columns(3)
     with c1:
-        ta = ticker_prefix_autocomplete(
-            "Stock A", key="compare_a", default="AAPL",
-        )
+        ta = ticker_select("Stock A", key="compare_a_sel", default="AAPL")
     with c2:
-        tb = ticker_prefix_autocomplete(
-            "Stock B", key="compare_b", default="MSFT",
-        )
+        tb = ticker_select("Stock B", key="compare_b_sel", default="MSFT")
     with c3:
         period_label = st.selectbox(
             "Time range",
@@ -112,10 +115,13 @@ def _render_correlation_inputs(default_period: str) -> tuple[list[str], str, Non
         "Type to search tickers, click to add. Press Enter to add any symbol "
         "not in the list. Correlations use **daily log returns**."
     )
+    # Options show the company name alongside the ticker (AAPL — Apple Inc.).
+    # ticker_from_label strips the suffix back off when we hand tickers to
+    # the downstream dashboard.
     selected = st.multiselect(
         "Tickers",
-        options=POPULAR_TICKERS,
-        default=["AAPL", "MSFT", "GOOGL"],
+        options=ticker_labels(),
+        default=[label_for_ticker(t) for t in ("AAPL", "MSFT", "GOOGL")],
         accept_new_options=True,
         key="corr_tickers",
     )
@@ -125,7 +131,8 @@ def _render_correlation_inputs(default_period: str) -> tuple[list[str], str, Non
         index=period_index(default_period, list(PERIOD_OPTIONS.keys())),
         key="corr_period",
     )
-    return dedupe_tickers([normalize_ticker(t) for t in selected]), period_label, None
+    tickers = [normalize_ticker(ticker_from_label(label)) for label in selected]
+    return dedupe_tickers(tickers), period_label, None
 
 
 def _render_recommender_tab(controller: VisualizationController, default_period: str) -> None:
@@ -258,39 +265,74 @@ def main() -> None:
         .term-meta span.dot { color:#22C55E; margin-right:0.3rem; }
 
         /* === TABS: terminal-style bracketed labels, full-width ===
-           Each tab flex-grows equally so the row fills the content area,
-           and every tab reserves 2px of transparent top-border so switching
-           tabs only RECOLORS it — no layout shift that would make the
-           label jump down when selected. */
-        .stTabs [data-baseweb="tab-list"] {
-            gap:0;
-            border-bottom:1px solid #1E2027;
-            background:transparent;
-            width:100%;
-            display:flex;
+           Streamlit renders tabs as flex children of a tablist. Older
+           versions use [data-baseweb="tab"], newer ones use button[role="tab"]
+           — target both. Each tab flex-grows equally (`flex:1 1 0`) and
+           justifies its content to center, so the row fills the content
+           area with every label centered inside its slot. Every tab
+           reserves 2px of transparent top-border so selecting a tab is a
+           pure recolor — no vertical jump. */
+        .stTabs,
+        [data-testid="stTabs"] { width:100% !important; }
+
+        .stTabs [data-baseweb="tab-list"],
+        [data-testid="stTabs"] div[role="tablist"] {
+            gap:0 !important;
+            width:100% !important;
+            display:flex !important;
+            border-bottom:1px solid #1E2027 !important;
+            background:transparent !important;
         }
-        .stTabs [data-baseweb="tab"] {
+
+        .stTabs [data-baseweb="tab"],
+        [data-testid="stTabs"] button[role="tab"] {
             flex:1 1 0 !important;
+            min-width:0 !important;
+            display:flex !important;
+            align-items:center !important;
+            justify-content:center !important;
             text-align:center !important;
-            padding:0.85rem 0.5rem !important;
+            padding:0.95rem 0.75rem !important;
             font-family:"Inter", sans-serif !important;
-            font-size:0.88rem !important;
+            font-size:0.92rem !important;
             font-weight:600 !important;
-            letter-spacing:0.08em !important;
+            letter-spacing:0.06em !important;
             text-transform:uppercase !important;
             color:#6B7280 !important;
-            border-right:1px solid #1E2027;
+            border-right:1px solid #1E2027 !important;
             border-top:2px solid transparent !important;
-            background:transparent;
+            background:transparent !important;
         }
-        .stTabs [data-baseweb="tab"]:last-child { border-right:none; }
-        .stTabs [data-baseweb="tab"]:hover { color:#E8ECEF !important; background:#0E1015; }
-        .stTabs [aria-selected="true"] {
+        .stTabs [data-baseweb="tab"]:last-child,
+        [data-testid="stTabs"] button[role="tab"]:last-child {
+            border-right:none !important;
+        }
+        .stTabs [data-baseweb="tab"]:hover,
+        [data-testid="stTabs"] button[role="tab"]:hover {
+            color:#E8ECEF !important;
+            background:#0E1015 !important;
+        }
+        .stTabs [aria-selected="true"],
+        [data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
             color:var(--accent, #3B82F6) !important;
             background:#0E1015 !important;
             border-top-color:var(--accent, #3B82F6) !important;
         }
+        .stTabs [aria-selected="true"] p,
+        [data-testid="stTabs"] button[role="tab"][aria-selected="true"] p {
+            color:var(--accent, #3B82F6) !important;
+        }
         .stTabs [data-baseweb="tab-highlight"] { display:none !important; }
+
+        /* Form submit buttons (Log in / Create account) are the main calls
+           to action — make them full-width and taller so they don't feel
+           afterthoughts under the inputs. */
+        [data-testid="stFormSubmitButton"] button {
+            width:100% !important;
+            padding:0.75rem 1.5rem !important;
+            font-size:0.95rem !important;
+            min-height:2.75rem !important;
+        }
 
         /* === HEADINGS === */
         h1, h2, h3, h4 {

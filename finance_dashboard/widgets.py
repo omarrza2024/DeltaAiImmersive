@@ -17,6 +17,87 @@ POPULAR_TICKERS: list[str] = sorted(
     | {t for ts in PREDEFINED_UNIVERSES.values() for t in ts}
 )
 
+# Separator between the ticker and its company name in option labels.
+# Used both when building labels and when parsing a ticker back out.
+_LABEL_SEP = " — "
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def ticker_labels() -> list[str]:
+    """`["AAPL — Apple Inc.", "ABBV — AbbVie Inc.", ...]` for every popular ticker.
+
+    Company names come from the yfinance-backed `company_name()` lookup, which
+    is itself cached — we add another layer here so building the dropdown is
+    always a cache hit on reruns. One hour TTL is fine; company names don't
+    churn.
+    """
+    from finance_dashboard.data import company_name
+    labels: list[str] = []
+    for ticker in POPULAR_TICKERS:
+        try:
+            name = company_name(ticker) or ""
+        except Exception:
+            name = ""
+        labels.append(f"{ticker}{_LABEL_SEP}{name}" if name else ticker)
+    return labels
+
+
+def ticker_from_label(label: str) -> str:
+    """Extract the ticker symbol from an `AAPL — Apple Inc.` option label."""
+    if not label:
+        return ""
+    head = label.split(_LABEL_SEP, 1)[0]
+    return head.strip().upper()
+
+
+def label_for_ticker(ticker: str) -> str:
+    """Build the display label for a ticker, falling back to the symbol itself."""
+    from finance_dashboard.data import company_name
+    try:
+        name = company_name(ticker) or ""
+    except Exception:
+        name = ""
+    return f"{ticker}{_LABEL_SEP}{name}" if name else ticker
+
+
+def ticker_select(
+    label: str,
+    *,
+    key: str,
+    default: str = "AAPL",
+    label_visibility: str = "visible",
+) -> str:
+    """Single-ticker picker with the Correlation-tab search UX.
+
+    Uses `st.multiselect(max_selections=1, accept_new_options=True)` so the
+    user gets the same type-ahead dropdown as the Correlation tab: typing a
+    letter filters the options down to tickers that match, and the full
+    company name is visible alongside each symbol. Falling back to a plain
+    text input when a user types an unknown symbol (e.g. a small-cap not in
+    `POPULAR_TICKERS`) still works because `accept_new_options=True`.
+
+    Returns the ticker symbol only — the company-name annotation is stripped.
+    """
+    options = ticker_labels()
+    default_label = label_for_ticker(default) if default else ""
+    default_list = [default_label] if default_label and default_label in options else (
+        [default_label] if default_label else []
+    )
+
+    selected = st.multiselect(
+        label,
+        options=options,
+        default=default_list,
+        max_selections=1,
+        accept_new_options=True,
+        key=key,
+        label_visibility=label_visibility,
+        placeholder="Type a letter to search (e.g. A for AAPL, AMZN...)",
+    )
+    if not selected:
+        return ""
+    return ticker_from_label(selected[0])
+
 
 def ticker_prefix_autocomplete(
     label: str,
