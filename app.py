@@ -300,74 +300,130 @@ def main() -> None:
         }
         .term-meta span.dot { color:#22C55E; margin-right:0.3rem; }
 
-        /* === TABS: terminal-style bracketed labels, full-width ===
-           Streamlit renders tabs as flex children of a tablist. Older
-           versions use [data-baseweb="tab"], newer ones use button[role="tab"]
-           — target both. Each tab flex-grows equally (`flex:1 1 0`) and
-           justifies its content to center, so the row fills the content
-           area with every label centered inside its slot. Every tab
-           reserves 2px of transparent top-border so selecting a tab is a
-           pure recolor — no vertical jump. */
-        .stTabs,
-        [data-testid="stTabs"] { width:100% !important; }
+        /* === TABS: full-width, uppercase, no overlap ===
+           Streamlit's own stylesheet sets display: flex and some tab padding
+           on the tab-list; we override hard with max specificity + important.
+           Target every variant Streamlit has shipped: [data-baseweb="tab"],
+           button[role="tab"], and [data-testid="stTabs"] descendants.
 
-        .stTabs [data-baseweb="tab-list"],
-        [data-testid="stTabs"] div[role="tablist"] {
-            gap:0 !important;
-            width:100% !important;
+           Two things that previously failed on the deployed app:
+           1) `overflow: hidden` on the tablist, so tabs can't horizontally
+              scroll out of view and flex:1 actually spreads them.
+           2) styling the inner <p> — Streamlit wraps every tab label in a
+              <p> whose own typography was swallowing the uppercase/weight
+              rules set on the <button> itself. */
+        div.stTabs,
+        div[data-testid="stTabs"] { width:100% !important; }
+
+        div.stTabs > div[data-baseweb="tab-list"],
+        div[data-testid="stTabs"] div[data-baseweb="tab-list"],
+        div[data-testid="stTabs"] div[role="tablist"] {
             display:flex !important;
+            flex-direction:row !important;
+            flex-wrap:nowrap !important;
+            width:100% !important;
+            gap:0 !important;
+            overflow:hidden !important;
             border-bottom:1px solid #1E2027 !important;
             background:transparent !important;
         }
 
-        .stTabs [data-baseweb="tab"],
-        [data-testid="stTabs"] button[role="tab"] {
+        div.stTabs button[data-baseweb="tab"],
+        div.stTabs button[role="tab"],
+        div[data-testid="stTabs"] button[data-baseweb="tab"],
+        div[data-testid="stTabs"] button[role="tab"] {
             flex:1 1 0 !important;
             min-width:0 !important;
+            width:auto !important;
             display:flex !important;
             align-items:center !important;
             justify-content:center !important;
             text-align:center !important;
-            padding:0.95rem 0.75rem !important;
-            font-family:"Inter", sans-serif !important;
-            font-size:0.92rem !important;
-            font-weight:600 !important;
-            letter-spacing:0.06em !important;
-            text-transform:uppercase !important;
+            padding:1rem 0.75rem !important;
+            margin:0 !important;
             color:#6B7280 !important;
+            background:transparent !important;
+            border:none !important;
             border-right:1px solid #1E2027 !important;
             border-top:2px solid transparent !important;
-            background:transparent !important;
+            border-radius:0 !important;
+            box-shadow:none !important;
+            cursor:pointer !important;
         }
-        .stTabs [data-baseweb="tab"]:last-child,
-        [data-testid="stTabs"] button[role="tab"]:last-child {
+        div.stTabs button[data-baseweb="tab"]:last-child,
+        div.stTabs button[role="tab"]:last-child,
+        div[data-testid="stTabs"] button[data-baseweb="tab"]:last-child,
+        div[data-testid="stTabs"] button[role="tab"]:last-child {
             border-right:none !important;
         }
-        .stTabs [data-baseweb="tab"]:hover,
-        [data-testid="stTabs"] button[role="tab"]:hover {
+
+        /* Streamlit wraps each tab label in a <p>; its own typography beats
+           anything set on the <button>, so we restate font rules here too. */
+        div.stTabs button[data-baseweb="tab"] p,
+        div.stTabs button[role="tab"] p,
+        div[data-testid="stTabs"] button[data-baseweb="tab"] p,
+        div[data-testid="stTabs"] button[role="tab"] p,
+        div.stTabs button[data-baseweb="tab"] div[data-testid="stMarkdownContainer"] p,
+        div[data-testid="stTabs"] button[role="tab"] div[data-testid="stMarkdownContainer"] p {
+            font-family:"Inter", sans-serif !important;
+            font-size:0.9rem !important;
+            font-weight:600 !important;
+            letter-spacing:0.07em !important;
+            text-transform:uppercase !important;
+            text-align:center !important;
+            line-height:1.2 !important;
+            margin:0 !important;
+            padding:0 !important;
+            color:inherit !important;
+            white-space:nowrap !important;
+            overflow:hidden !important;
+            text-overflow:ellipsis !important;
+        }
+
+        div.stTabs button[data-baseweb="tab"]:hover,
+        div.stTabs button[role="tab"]:hover,
+        div[data-testid="stTabs"] button[data-baseweb="tab"]:hover,
+        div[data-testid="stTabs"] button[role="tab"]:hover {
             color:#E8ECEF !important;
             background:#0E1015 !important;
         }
-        .stTabs [aria-selected="true"],
-        [data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
-            color:var(--accent, #3B82F6) !important;
-            background:#0E1015 !important;
-            border-top-color:var(--accent, #3B82F6) !important;
-        }
-        .stTabs [aria-selected="true"] p,
-        [data-testid="stTabs"] button[role="tab"][aria-selected="true"] p {
-            color:var(--accent, #3B82F6) !important;
-        }
-        .stTabs [data-baseweb="tab-highlight"] { display:none !important; }
 
-        /* Form submit buttons (Log in / Create account) are the main calls
-           to action — make them full-width and taller so they don't feel
-           afterthoughts under the inputs. */
-        [data-testid="stFormSubmitButton"] button {
+        div.stTabs button[aria-selected="true"],
+        div[data-testid="stTabs"] button[aria-selected="true"] {
+            color:#3B82F6 !important;
+            background:#0E1015 !important;
+            border-top-color:#3B82F6 !important;
+        }
+        div.stTabs button[aria-selected="true"] p,
+        div[data-testid="stTabs"] button[aria-selected="true"] p {
+            color:#3B82F6 !important;
+        }
+
+        /* Kill the baseweb underline sliders Streamlit draws under the tabs. */
+        div.stTabs [data-baseweb="tab-highlight"],
+        div.stTabs [data-baseweb="tab-border"],
+        div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+        div[data-testid="stTabs"] [data-baseweb="tab-border"] {
+            display:none !important;
+        }
+
+        /* Form submit buttons (Log in / Create account) — full-width, taller,
+           primary-CTA feel. The nested <p> again carries its own font rules. */
+        div[data-testid="stFormSubmitButton"],
+        div[data-testid="stFormSubmitButton"] > button {
             width:100% !important;
-            padding:0.75rem 1.5rem !important;
-            font-size:0.95rem !important;
-            min-height:2.75rem !important;
+        }
+        div[data-testid="stFormSubmitButton"] > button {
+            padding:0.85rem 1.5rem !important;
+            min-height:3rem !important;
+            font-size:1rem !important;
+            font-weight:600 !important;
+            border-radius:8px !important;
+        }
+        div[data-testid="stFormSubmitButton"] > button p {
+            font-size:1rem !important;
+            font-weight:600 !important;
+            margin:0 !important;
         }
 
         /* === HEADINGS === */
