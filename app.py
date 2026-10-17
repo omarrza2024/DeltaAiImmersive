@@ -495,8 +495,11 @@ def main() -> None:
             letter-spacing:0.05em !important; text-transform:uppercase;
         }
 
-        /* === BUTTONS: filled, product-app feel === */
-        .stButton > button, .stFormSubmitButton > button {
+        /* === BUTTONS: filled primary, except tertiary (text-link style) ===
+           :not([kind="tertiary"]) keeps st.button(type="tertiary") rendering
+           as a quiet text link — those don't want the blue primary fill. */
+        .stButton > button:not([kind="tertiary"]),
+        .stFormSubmitButton > button:not([kind="tertiary"]) {
             background:var(--accent, #3B82F6) !important;
             color:#FFFFFF !important;
             border:1px solid var(--accent, #3B82F6) !important;
@@ -507,8 +510,24 @@ def main() -> None:
             padding:0.5rem 1.2rem !important;
             transition:filter 120ms ease;
         }
-        .stButton > button:hover, .stFormSubmitButton > button:hover {
+        .stButton > button:not([kind="tertiary"]):hover,
+        .stFormSubmitButton > button:not([kind="tertiary"]):hover {
             filter:brightness(1.1) !important;
+        }
+        /* Tertiary = text link: no fill, no border, muted color, hover brightens */
+        .stButton > button[kind="tertiary"] {
+            background:transparent !important;
+            color:#9AA3AD !important;
+            border:none !important;
+            padding:0.4rem 0.6rem !important;
+            font-weight:500 !important;
+            font-family:"Inter", sans-serif !important;
+            font-size:0.85rem !important;
+            text-decoration:none !important;
+        }
+        .stButton > button[kind="tertiary"]:hover {
+            color:#E8ECEF !important;
+            background:transparent !important;
         }
 
         /* === CONTAINERS: sharp corners, dark card === */
@@ -613,19 +632,40 @@ def main() -> None:
             margin-bottom:0.6rem !important;
         }
 
-        /* Claude-style chat input: pin to the bottom of the viewport, no
-           blue focus ring, soft dark card. History above scrolls up as new
-           messages arrive while the input stays glued to one spot. */
-        [data-testid="stChatInput"] {
-            position:sticky !important;
+        /* === CHAT INPUT: Claude-style, pinned to viewport bottom ===
+           Streamlit tabs don't give st.chat_input a scrolling parent, so
+           position: sticky falls back to static (the input scrolls with the
+           page). position: fixed anchors it to the viewport bottom instead,
+           so messages scroll up while the input stays glued to one spot.
+           Padding-bottom on the main container prevents the last message
+           from being hidden behind the fixed input. */
+        html body [data-testid="stChatInput"] {
+            position:fixed !important;
             bottom:0 !important;
+            /* Clear the sidebar on the left (default 21rem when expanded). */
+            left:21rem !important;
+            right:0 !important;
+            width:auto !important;
             background:#000000 !important;
-            padding:0.75rem 0 1.25rem !important;
+            padding:1rem 1.5rem 1.5rem !important;
             z-index:50 !important;
+            border-top:1px solid #1E2027 !important;
         }
-        [data-testid="stChatInput"] textarea,
-        [data-testid="stChatInput"] div[data-baseweb="base-input"],
-        [data-testid="stChatInput"] div[data-baseweb="input"] {
+        /* When the sidebar is collapsed, Streamlit removes its width — reset
+           our left offset to zero so the chat input stretches edge-to-edge. */
+        html body:has([data-testid="stSidebar"][aria-expanded="false"]) [data-testid="stChatInput"] {
+            left:0 !important;
+        }
+        /* Reserve space at the bottom of the page so the last chat bubble
+           isn't tucked under the fixed input. */
+        html body .main .block-container,
+        html body section.main .block-container,
+        html body [data-testid="stMain"] .block-container {
+            padding-bottom:8rem !important;
+        }
+        html body [data-testid="stChatInput"] textarea,
+        html body [data-testid="stChatInput"] div[data-baseweb="base-input"],
+        html body [data-testid="stChatInput"] div[data-baseweb="input"] {
             background:#0E1015 !important;
             border:1px solid #262A33 !important;
             border-radius:14px !important;
@@ -634,14 +674,19 @@ def main() -> None:
             box-shadow:none !important;
             outline:none !important;
         }
-        /* Kill the blue focus ring entirely — Claude's input stays understated. */
-        [data-testid="stChatInput"] textarea:focus,
-        [data-testid="stChatInput"] textarea:focus-visible,
-        [data-testid="stChatInput"] div[data-baseweb="base-input"]:focus-within,
-        [data-testid="stChatInput"] div[data-baseweb="input"]:focus-within {
-            border-color:#3A4150 !important;
+        /* Kill every variant of the blue focus ring. Streamlit's baseweb
+           wrappers apply their own :focus-within styles that need matching. */
+        html body [data-testid="stChatInput"] textarea:focus,
+        html body [data-testid="stChatInput"] textarea:focus-visible,
+        html body [data-testid="stChatInput"] textarea:active,
+        html body [data-testid="stChatInput"] div[data-baseweb="base-input"],
+        html body [data-testid="stChatInput"] div[data-baseweb="base-input"]:focus-within,
+        html body [data-testid="stChatInput"] div[data-baseweb="input"],
+        html body [data-testid="stChatInput"] div[data-baseweb="input"]:focus-within {
+            border-color:#262A33 !important;
             box-shadow:none !important;
             outline:none !important;
+            outline-offset:0 !important;
         }
 
         /* === TYPING DOTS — shows while waiting for the LLM === */
