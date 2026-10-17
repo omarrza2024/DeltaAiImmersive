@@ -26,6 +26,8 @@ from finance_dashboard.auth.ui import (
 )
 from finance_dashboard.widgets import (
     POPULAR_TICKERS,
+    etf_from_label,
+    label_for_etf,
     label_for_ticker,
     ticker_from_label,
     ticker_labels,
@@ -174,10 +176,14 @@ def _render_recommender_tab(controller: VisualizationController, default_period:
     _TIME_DEPENDENT = {"Volatility", "Returns", "SMA", "MACD"}
     needs_time_range = any(f in _TIME_DEPENDENT for f in features)
 
+    # ETF options show the fund's full name alongside the ticker so a user
+    # doesn't have to recognize three-letter ETF symbols by heart.
+    etf_options = ["None"] + [label_for_etf(e) for e in sorted(ETF_FALLBACK_HOLDINGS)]
+
     with st.form("recommender_form"):
         if needs_time_range:
             c1, c2, c3 = st.columns(3)
-            etf = c1.selectbox("ETF (optional)", ["None"] + sorted(ETF_FALLBACK_HOLDINGS))
+            etf_label = c1.selectbox("ETF (optional)", etf_options)
             universes = c2.multiselect("Predefined universes (optional)", list(PREDEFINED_UNIVERSES))
             period_label = c3.selectbox(
                 "Time range",
@@ -186,22 +192,39 @@ def _render_recommender_tab(controller: VisualizationController, default_period:
             )
         else:
             c1, c2 = st.columns(2)
-            etf = c1.selectbox("ETF (optional)", ["None"] + sorted(ETF_FALLBACK_HOLDINGS))
+            etf_label = c1.selectbox("ETF (optional)", etf_options)
             universes = c2.multiselect("Predefined universes (optional)", list(PREDEFINED_UNIVERSES))
             # Time range is irrelevant for fundamentals/sentiment-only runs,
             # but the recommender request still needs a value — pass the
             # user's default so nothing downstream breaks.
             period_label = default_period if default_period in _RECOMMENDER_PERIODS else "1 year"
-        custom_text = st.text_input("Extra tickers (optional, comma separated)", value="")
+
+        # Extra tickers: searchable multiselect with company-name labels,
+        # matching the Correlation and Compare UX. accept_new_options=True
+        # lets a user still add an unknown symbol by typing it + Enter.
+        extra_selected = st.multiselect(
+            "Extra tickers (optional)",
+            options=ticker_labels(),
+            default=[],
+            accept_new_options=True,
+            key="recommender_extra_tickers",
+            placeholder="Type a letter to search (e.g. A for AAPL, AMD...)",
+        )
+        # Convert selections back to a comma-separated ticker string that the
+        # existing RecommendationRequest.from_user_input() parser understands.
+        custom_text = ",".join(ticker_from_label(lbl) for lbl in extra_selected)
+
         submitted = st.form_submit_button("Get recommendations")
 
     if not submitted:
         st.info("Choose your sources and press **Get recommendations**.")
         return
 
+    etf = etf_from_label(etf_label)
+
     try:
         request = RecommendationRequest.from_user_input(
-            etf=None if etf == "None" else etf,
+            etf=etf,
             universe_names=universes,
             custom_tickers_text=custom_text,
             feature_names=[_FEATURE_LABELS[f] for f in features],

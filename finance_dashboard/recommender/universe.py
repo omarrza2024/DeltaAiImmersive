@@ -43,6 +43,32 @@ ETF_FALLBACK_HOLDINGS: dict[str, list[str]] = {
     "VFH":  ["BRK-B", "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "SPGI", "AXP"],
 }
 
+# Full-name display label for each supported ETF. The UI pairs these with
+# the symbol so a user who doesn't memorize three-letter ETF tickers can
+# still tell which fund they're picking.
+ETF_DISPLAY_NAMES: dict[str, str] = {
+    "SPY":  "SPDR S&P 500 ETF",
+    "VOO":  "Vanguard S&P 500 ETF",
+    "QQQ":  "Invesco QQQ Trust (Nasdaq 100)",
+    "DIA":  "SPDR Dow Jones Industrial Average",
+    "IWM":  "iShares Russell 2000 ETF",
+    "VTI":  "Vanguard Total Stock Market ETF",
+    "XLK":  "Technology Select Sector SPDR",
+    "XLV":  "Health Care Select Sector SPDR",
+    "XLF":  "Financial Select Sector SPDR",
+    "XLE":  "Energy Select Sector SPDR",
+    "XLY":  "Consumer Discretionary Select Sector SPDR",
+    "XLP":  "Consumer Staples Select Sector SPDR",
+    "XLI":  "Industrial Select Sector SPDR",
+    "XLU":  "Utilities Select Sector SPDR",
+    "XLC":  "Communication Services Select Sector SPDR",
+    "XLRE": "Real Estate Select Sector SPDR",
+    "XLB":  "Materials Select Sector SPDR",
+    "VGT":  "Vanguard Information Technology ETF",
+    "VHT":  "Vanguard Health Care ETF",
+    "VFH":  "Vanguard Financials ETF",
+}
+
 # Sector universes drawn from across the supported ETFs; selectable without an ETF.
 PREDEFINED_UNIVERSES: dict[str, list[str]] = {
     "Tech": ["AAPL", "MSFT", "NVDA", "AVGO", "GOOGL", "META", "AMD", "CRM", "ADBE", "ORCL"],

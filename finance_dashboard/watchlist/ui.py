@@ -18,7 +18,12 @@ from finance_dashboard.auth.ui import current_user
 from finance_dashboard.config import PERIOD_OPTIONS
 from finance_dashboard.data import company_name, fetch_history
 from finance_dashboard.watchlist import store
-from finance_dashboard.widgets import POPULAR_TICKERS, ticker_prefix_autocomplete
+from finance_dashboard.widgets import (
+    POPULAR_TICKERS,
+    ticker_from_label,
+    ticker_labels,
+    ticker_prefix_autocomplete,
+)
 
 _INDICES = [
     ("SPY", "S&P 500"),
@@ -538,20 +543,26 @@ def _render_watchlist(wl: dict, username: str, db) -> None:
                 unsafe_allow_html=True,
             )
 
-        # --- add-ticker row with starts-with autocomplete ---
+        # --- add-ticker row: searchable dropdown with company-name labels ---
         add_c1, add_c2 = st.columns([5, 1.2])
+        add_key = f"wl-add-sel-{wid}"
         with add_c1:
-            new_ticker = ticker_prefix_autocomplete(
+            picked = st.multiselect(
                 "Add a ticker",
-                key=f"wl-add-{wid}",
-                placeholder="Add a ticker (type a letter to see suggestions)",
+                options=ticker_labels(),
+                default=[],
+                max_selections=1,
+                accept_new_options=True,
+                key=add_key,
                 label_visibility="collapsed",
+                placeholder="Add a ticker (type a letter to search)",
             )
+        new_ticker = ticker_from_label(picked[0]) if picked else ""
         if add_c2.button("Add", key=f"addbtn-{wid}", use_container_width=True):
             try:
                 store.add_ticker(db, username, wid, new_ticker, exists_fn=_ticker_exists)
-                # Clear the input + its suggestion state after successful add.
-                st.session_state.pop(f"_tx_wl-add-{wid}", None)
+                # Clear the picker so the row is ready for the next ticker.
+                st.session_state.pop(add_key, None)
                 st.rerun()
             except (ValueError, PermissionError) as exc:
                 st.error(str(exc))

@@ -5,6 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 from finance_dashboard.recommender.universe import (
+    ETF_DISPLAY_NAMES,
     ETF_FALLBACK_HOLDINGS,
     PREDEFINED_UNIVERSES,
 )
@@ -18,8 +19,9 @@ POPULAR_TICKERS: list[str] = sorted(
 )
 
 # Separator between the ticker and its company name in option labels.
-# Used both when building labels and when parsing a ticker back out.
-_LABEL_SEP = " — "
+# A thin middle dot reads cleaner than a dash — subtle enough to not
+# compete with the ticker but clear enough to delimit the fields.
+_LABEL_SEP = "  ·  "
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -43,11 +45,17 @@ def ticker_labels() -> list[str]:
 
 
 def ticker_from_label(label: str) -> str:
-    """Extract the ticker symbol from an `AAPL — Apple Inc.` option label."""
+    """Extract the ticker symbol from an `AAPL · Apple Inc.` option label.
+
+    Tolerates both the current middle-dot separator and the older em-dash
+    one, so session_state values persisted before this change still parse.
+    """
     if not label:
         return ""
-    head = label.split(_LABEL_SEP, 1)[0]
-    return head.strip().upper()
+    for sep in (_LABEL_SEP, " · ", " — "):
+        if sep in label:
+            return label.split(sep, 1)[0].strip().upper()
+    return label.strip().upper()
 
 
 def label_for_ticker(ticker: str) -> str:
@@ -58,6 +66,21 @@ def label_for_ticker(ticker: str) -> str:
     except Exception:
         name = ""
     return f"{ticker}{_LABEL_SEP}{name}" if name else ticker
+
+
+def label_for_etf(etf: str) -> str:
+    """`QQQ  ·  Invesco QQQ Trust (Nasdaq 100)` — ETF ticker + full fund name."""
+    if not etf or etf == "None":
+        return etf
+    name = ETF_DISPLAY_NAMES.get(etf, "")
+    return f"{etf}{_LABEL_SEP}{name}" if name else etf
+
+
+def etf_from_label(label: str) -> str | None:
+    """Strip the ETF ticker back out of an `XLK  ·  Technology Select...` label."""
+    if not label or label == "None":
+        return None
+    return ticker_from_label(label)
 
 
 def ticker_select(
