@@ -154,9 +154,14 @@ def _render_recommender_tab(controller: VisualizationController, default_period:
     )
     if guest:
         locked = ", ".join(sorted(_API_GATED_FEATURES))
-        st.caption(
-            f"🔒 **{locked}** uses a live news API — [sign in](#sign-in) to unlock it."
+        lock_c1, lock_c2 = st.columns([5, 1])
+        lock_c1.caption(
+            f"🔒 **{locked}** uses a live news API — sign in to unlock it."
         )
+        if lock_c2.button("Sign in", key="sentiment_signin_cta",
+                          use_container_width=True):
+            st.session_state["_force_signin"] = True
+            st.rerun()
     _TIME_DEPENDENT = {"Volatility", "Returns", "SMA", "MACD"}
     needs_time_range = any(f in _TIME_DEPENDENT for f in features)
 
@@ -250,20 +255,11 @@ def main() -> None:
         }
         .term-meta span.dot { color:#22C55E; margin-right:0.3rem; }
 
-        /* === TABS: terminal-style bracketed labels ===
-           Streamlit's tab DOM is a moving target across releases, so match
-           every selector it has shipped recently: baseweb attributes, ARIA
-           roles, and the stTabs test-id. Each rule carries !important so the
-           app theme can't win against our styling. */
-        .stTabs [data-baseweb="tab-list"],
-        [data-testid="stTabs"] [role="tablist"] {
-            gap:0 !important;
-            border-bottom:1px solid #1E2027 !important;
-            background:transparent !important;
+        /* === TABS: terminal-style bracketed labels === */
+        .stTabs [data-baseweb="tab-list"] {
+            gap:0; border-bottom:1px solid #1E2027; background:transparent;
         }
-        .stTabs [data-baseweb="tab"],
-        [data-testid="stTabs"] button[role="tab"],
-        .stTabs button[role="tab"] {
+        .stTabs [data-baseweb="tab"] {
             padding:0.85rem 1.5rem !important;
             font-family:"Inter", sans-serif !important;
             font-size:0.88rem !important;
@@ -271,36 +267,15 @@ def main() -> None:
             letter-spacing:0.08em !important;
             text-transform:uppercase !important;
             color:#6B7280 !important;
-            border-right:1px solid #1E2027 !important;
-            background:transparent !important;
+            border-right:1px solid #1E2027;
+            background:transparent;
         }
-        .stTabs [data-baseweb="tab"] p,
-        [data-testid="stTabs"] button[role="tab"] p,
-        .stTabs button[role="tab"] p {
-            /* Streamlit wraps the tab label in a <p> whose own typography
-               would otherwise override the parent rules above. */
-            font-size:0.88rem !important;
-            font-weight:600 !important;
-            letter-spacing:0.08em !important;
-            text-transform:uppercase !important;
-            margin:0 !important;
-        }
-        .stTabs [data-baseweb="tab"]:hover,
-        [data-testid="stTabs"] button[role="tab"]:hover,
-        .stTabs button[role="tab"]:hover {
-            color:#E8ECEF !important; background:#0E1015 !important;
-        }
-        .stTabs [aria-selected="true"],
-        [data-testid="stTabs"] button[role="tab"][aria-selected="true"],
-        .stTabs button[role="tab"][aria-selected="true"] {
+        .stTabs [data-baseweb="tab"]:hover { color:#E8ECEF !important; background:#0E1015; }
+        .stTabs [aria-selected="true"] {
             color:var(--accent, #3B82F6) !important;
             background:#0E1015 !important;
             border-top:2px solid var(--accent, #3B82F6) !important;
             padding-top:calc(0.85rem - 2px) !important;
-        }
-        .stTabs [aria-selected="true"] p,
-        [data-testid="stTabs"] button[role="tab"][aria-selected="true"] p {
-            color:var(--accent, #3B82F6) !important;
         }
         .stTabs [data-baseweb="tab-highlight"] { display:none !important; }
 
