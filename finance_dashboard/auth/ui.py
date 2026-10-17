@@ -98,7 +98,9 @@ def require_login() -> str | None:
             headline="Sign in to TradeMatrix",
             subcopy="Your watchlists, chats, and preferences are saved to your account.",
         )
-        if st.button("← Back to the app", key="_back_to_guest"):
+        # Tertiary (text-link) style so this reads as a quiet "nevermind"
+        # rather than competing with the primary Log in / Create account CTA.
+        if st.button("← Back to the app", key="_back_to_guest", type="tertiary"):
             st.session_state.pop("_force_signin", None)
             st.rerun()
         return None
