@@ -255,12 +255,22 @@ def main() -> None:
         }
         .term-meta span.dot { color:#22C55E; margin-right:0.3rem; }
 
-        /* === TABS: terminal-style bracketed labels === */
+        /* === TABS: terminal-style bracketed labels, full-width ===
+           Each tab flex-grows equally so the row fills the content area,
+           and every tab reserves 2px of transparent top-border so switching
+           tabs only RECOLORS it — no layout shift that would make the
+           label jump down when selected. */
         .stTabs [data-baseweb="tab-list"] {
-            gap:0; border-bottom:1px solid #1E2027; background:transparent;
+            gap:0;
+            border-bottom:1px solid #1E2027;
+            background:transparent;
+            width:100%;
+            display:flex;
         }
         .stTabs [data-baseweb="tab"] {
-            padding:0.85rem 1.5rem !important;
+            flex:1 1 0 !important;
+            text-align:center !important;
+            padding:0.85rem 0.5rem !important;
             font-family:"Inter", sans-serif !important;
             font-size:0.88rem !important;
             font-weight:600 !important;
@@ -268,14 +278,15 @@ def main() -> None:
             text-transform:uppercase !important;
             color:#6B7280 !important;
             border-right:1px solid #1E2027;
+            border-top:2px solid transparent !important;
             background:transparent;
         }
+        .stTabs [data-baseweb="tab"]:last-child { border-right:none; }
         .stTabs [data-baseweb="tab"]:hover { color:#E8ECEF !important; background:#0E1015; }
         .stTabs [aria-selected="true"] {
             color:var(--accent, #3B82F6) !important;
             background:#0E1015 !important;
-            border-top:2px solid var(--accent, #3B82F6) !important;
-            padding-top:calc(0.85rem - 2px) !important;
+            border-top-color:var(--accent, #3B82F6) !important;
         }
         .stTabs [data-baseweb="tab-highlight"] { display:none !important; }
 
