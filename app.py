@@ -344,13 +344,18 @@ def main() -> None:
             align-items:center !important;
             justify-content:center !important;
             text-align:center !important;
-            padding:1rem 0.75rem !important;
+            /* Equal vertical padding = perfect vertical centering of label. */
+            padding:1.1rem 0.75rem !important;
             margin:0 !important;
+            margin-bottom:-1px !important; /* overlap the tablist baseline */
             color:#6B7280 !important;
             background:transparent !important;
             border:none !important;
-            border-right:1px solid #1E2027 !important;
-            border-top:2px solid transparent !important;
+            /* Brighter divider between tabs so the "boxes" read as symmetric. */
+            border-right:1px solid #2A303A !important;
+            /* Reserve the underline on every tab so the selected state is a
+               pure recolor — no vertical shift, perfect alignment. */
+            border-bottom:2px solid transparent !important;
             border-radius:0 !important;
             box-shadow:none !important;
             cursor:pointer !important;
@@ -397,7 +402,8 @@ def main() -> None:
         div[data-testid="stTabs"] button[aria-selected="true"] {
             color:#3B82F6 !important;
             background:#0E1015 !important;
-            border-top-color:#3B82F6 !important;
+            /* Underline the selected tab across its own slot only. */
+            border-bottom-color:#3B82F6 !important;
         }
         div.stTabs button[aria-selected="true"] p,
         div[data-testid="stTabs"] button[aria-selected="true"] p {
@@ -607,14 +613,35 @@ def main() -> None:
             margin-bottom:0.6rem !important;
         }
 
-        [data-testid="stChatInput"] textarea {
-            background:#0E1015 !important; border:1px solid #262A33 !important;
-            border-radius:12px !important; padding:0.75rem 0.95rem !important;
-            font-size:14px !important;
+        /* Claude-style chat input: pin to the bottom of the viewport, no
+           blue focus ring, soft dark card. History above scrolls up as new
+           messages arrive while the input stays glued to one spot. */
+        [data-testid="stChatInput"] {
+            position:sticky !important;
+            bottom:0 !important;
+            background:#000000 !important;
+            padding:0.75rem 0 1.25rem !important;
+            z-index:50 !important;
         }
-        [data-testid="stChatInput"] textarea:focus {
-            border-color:#3B82F6 !important;
-            box-shadow:0 0 0 3px color-mix(in srgb, #3B82F6 20%, transparent) !important;
+        [data-testid="stChatInput"] textarea,
+        [data-testid="stChatInput"] div[data-baseweb="base-input"],
+        [data-testid="stChatInput"] div[data-baseweb="input"] {
+            background:#0E1015 !important;
+            border:1px solid #262A33 !important;
+            border-radius:14px !important;
+            padding:0.75rem 0.95rem !important;
+            font-size:14px !important;
+            box-shadow:none !important;
+            outline:none !important;
+        }
+        /* Kill the blue focus ring entirely — Claude's input stays understated. */
+        [data-testid="stChatInput"] textarea:focus,
+        [data-testid="stChatInput"] textarea:focus-visible,
+        [data-testid="stChatInput"] div[data-baseweb="base-input"]:focus-within,
+        [data-testid="stChatInput"] div[data-baseweb="input"]:focus-within {
+            border-color:#3A4150 !important;
+            box-shadow:none !important;
+            outline:none !important;
         }
 
         /* === TYPING DOTS — shows while waiting for the LLM === */

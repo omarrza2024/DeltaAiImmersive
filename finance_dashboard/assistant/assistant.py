@@ -449,10 +449,19 @@ class InvestmentAssistant:
         prev_goal = replace(state.goal)
         try:
             state.goal = self._parser.update(state.goal, state.messages)
-        except UserInputError as exc:
-            return self._record(state, str(exc))
+        except UserInputError:
+            # LLM returned non-JSON — usually means the user asked a general
+            # finance question, not a goal update. Keep goal as-is and let
+            # the gathering/chat response answer the question naturally.
+            pass
         except Exception as exc:
-            raise LLMUnavailableError(f"Goal parser failed: {exc}") from exc
+            # Groq 400 ("Failed to generate JSON") is the same scenario — the
+            # model declined to produce JSON because the user wasn't talking
+            # about their goal. Skip quietly; the chat path will handle it.
+            if "json" in str(exc).lower() or "400" in str(exc):
+                pass
+            else:
+                raise LLMUnavailableError(f"Goal parser failed: {exc}") from exc
 
         # Follow-up mode: we've already given a shortlist. Only re-run the
         # pipeline if the user *actually* changed a constraint — otherwise
