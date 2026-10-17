@@ -363,17 +363,22 @@ def main() -> None:
             outline:none !important;
         }
 
-        /* Selectbox: click to pick, never typing. Target stSelectbox
-           specifically so stMultiSelect's search-as-you-type still works
-           (used in the Correlation tab). Hide the caret + ignore keystrokes. */
+        /* Selectboxes + multiselects: click ANYWHERE on the bar to open the
+           dropdown (not just the chevron). The old rule set pointer-events
+           to none on the input, which meant only the arrow was clickable —
+           that broke the natural "click the field" interaction users expect.
+           We still hide the caret and disable text selection, so single
+           selects read as click-to-pick instead of inviting typing. */
         [data-testid="stSelectbox"] div[data-baseweb="select"],
-        [data-testid="stSelectbox"] div[data-baseweb="select"] * {
+        [data-testid="stSelectbox"] div[data-baseweb="select"] *,
+        [data-testid="stMultiSelect"] div[data-baseweb="select"],
+        [data-testid="stMultiSelect"] div[data-baseweb="select"] * {
             cursor: pointer !important;
         }
         [data-testid="stSelectbox"] input {
             caret-color: transparent !important;
-            pointer-events: none !important;
             user-select: none !important;
+            cursor: pointer !important;
         }
 
         /* Multiselect chips: amber tinted. */
