@@ -78,13 +78,14 @@ def _render_default_period_selector() -> str:
 
 def _render_price_inputs(default_period: str) -> tuple[list[str], str]:
     # Handoff from the Watchlist tab: when the user clicks a ticker row there,
-    # seed the Prices ticker-select BEFORE it instantiates so the clicked
-    # ticker shows up in the dropdown.
+    # seed the Prices ticker input BEFORE it instantiates.
     pending = st.session_state.pop("_wl_pending_ticker", None)
     if pending:
-        st.session_state["price_ticker_sel"] = [label_for_ticker(pending)]
-    ticker_raw = ticker_select(
-        "Ticker", key="price_ticker_sel", default="AAPL",
+        st.session_state["_tx_price_ticker"] = pending
+    # Strict-prefix chip autocomplete (not Streamlit's substring multiselect):
+    # typing "A" shows only tickers starting with A, "AAPL" shows only AAPL.
+    ticker_raw = ticker_prefix_autocomplete(
+        "Ticker", key="price_ticker", default="AAPL",
     )
     period_label = st.selectbox(
         "Time range",
@@ -99,9 +100,9 @@ def _render_compare_inputs(default_period: str) -> tuple[list[str], str, None]:
     st.markdown("Compare **annualized** and **rolling volatility** for two stocks.")
     c1, c2, c3 = st.columns(3)
     with c1:
-        ta = ticker_select("Stock A", key="compare_a_sel", default="AAPL")
+        ta = ticker_prefix_autocomplete("Stock A", key="compare_a", default="AAPL")
     with c2:
-        tb = ticker_select("Stock B", key="compare_b_sel", default="MSFT")
+        tb = ticker_prefix_autocomplete("Stock B", key="compare_b", default="MSFT")
     with c3:
         period_label = st.selectbox(
             "Time range",
@@ -146,10 +147,6 @@ def _render_correlation_inputs(default_period: str) -> tuple[list[str], str, Non
 
 
 def _render_recommender_tab(controller: VisualizationController, default_period: str) -> None:
-    st.markdown(
-        "Group stocks into **risk buckets** (Low / Medium / High ±) from an ETF's "
-        "holdings, predefined universes, and/or your own tickers."
-    )
     st.caption(
         "All three sources below are **optional** — but pick **at least one** so "
         "there are stocks to analyze."

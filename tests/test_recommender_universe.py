@@ -16,7 +16,10 @@ def request_with(**kwargs) -> RecommendationRequest:
 
 
 def test_predefined_universes_exist():
-    assert set(PREDEFINED_UNIVERSES) == {"Tech", "Medical", "Finance"}
+    # Original three sectors must stay — the AI assistant and goal parser
+    # reference them by name. Additional sectors beyond these are fine.
+    required = {"Tech", "Medical", "Finance"}
+    assert required.issubset(set(PREDEFINED_UNIVERSES))
     for name, tickers in PREDEFINED_UNIVERSES.items():
         assert tickers, f"universe {name} is empty"
 

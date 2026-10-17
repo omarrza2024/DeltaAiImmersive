@@ -71,9 +71,16 @@ ETF_DISPLAY_NAMES: dict[str, str] = {
 
 # Sector universes drawn from across the supported ETFs; selectable without an ETF.
 PREDEFINED_UNIVERSES: dict[str, list[str]] = {
-    "Tech": ["AAPL", "MSFT", "NVDA", "AVGO", "GOOGL", "META", "AMD", "CRM", "ADBE", "ORCL"],
-    "Medical": ["LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "PFE", "AMGN", "ISRG", "VRTX"],
-    "Finance": ["JPM", "BRK-B", "V", "MA", "BAC", "WFC", "GS", "MS", "BLK", "AXP"],
+    "Tech":        ["AAPL", "MSFT", "NVDA", "AVGO", "GOOGL", "META", "AMD", "CRM", "ADBE", "ORCL"],
+    "Medical":     ["LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "PFE", "AMGN", "ISRG", "VRTX"],
+    "Finance":     ["JPM", "BRK-B", "V", "MA", "BAC", "WFC", "GS", "MS", "BLK", "AXP"],
+    "Energy":      ["XOM", "CVX", "COP", "EOG", "SLB", "MPC", "PSX", "OXY", "WMB", "VLO"],
+    "Consumer":    ["AMZN", "TSLA", "HD", "MCD", "WMT", "PG", "COST", "KO", "PEP", "NKE"],
+    "Industrials": ["CAT", "GE", "HON", "UNP", "BA", "DE", "UPS", "LMT", "ETN", "RTX"],
+    "Communications": ["META", "GOOGL", "GOOG", "NFLX", "DIS", "VZ", "T", "CMCSA", "EA", "TTWO"],
+    "Utilities":   ["NEE", "SO", "DUK", "SRE", "AEP", "D", "EXC", "XEL", "ED", "PCG"],
+    "Real Estate": ["PLD", "AMT", "EQIX", "WELL", "SPG", "DLR", "O", "PSA", "CCI", "EXR"],
+    "Materials":   ["LIN", "SHW", "ECL", "APD", "FCX", "NEM", "CTVA", "DD", "NUE", "DOW"],
 }
 
 

@@ -543,29 +543,40 @@ def _render_watchlist(wl: dict, username: str, db) -> None:
                 unsafe_allow_html=True,
             )
 
-        # --- add-ticker row: searchable dropdown with company-name labels ---
+        # --- add-ticker row: searchable multi-pick dropdown ---
         add_c1, add_c2 = st.columns([5, 1.2])
         add_key = f"wl-add-sel-{wid}"
         with add_c1:
+            # Guard against the StreamlitDefaultNotInOptionsError pattern — see
+            # ticker_select in widgets.py — by making options tolerant of any
+            # stale label the user may still have selected from a prior session.
+            opts = list(ticker_labels())
+            prior = st.session_state.get(add_key) or []
+            for lbl in prior:
+                if lbl not in opts:
+                    opts.append(lbl)
             picked = st.multiselect(
                 "Add a ticker",
-                options=ticker_labels(),
+                options=opts,
                 default=[],
-                max_selections=1,
                 accept_new_options=True,
                 key=add_key,
                 label_visibility="collapsed",
-                placeholder="Add a ticker (type a letter to search)",
+                placeholder="Type letters to search — pick one or more, then Add",
             )
-        new_ticker = ticker_from_label(picked[0]) if picked else ""
         if add_c2.button("Add", key=f"addbtn-{wid}", use_container_width=True):
-            try:
-                store.add_ticker(db, username, wid, new_ticker, exists_fn=_ticker_exists)
-                # Clear the picker so the row is ready for the next ticker.
-                st.session_state.pop(add_key, None)
-                st.rerun()
-            except (ValueError, PermissionError) as exc:
-                st.error(str(exc))
+            errors: list[str] = []
+            for label in picked:
+                ticker = ticker_from_label(label)
+                try:
+                    store.add_ticker(db, username, wid, ticker, exists_fn=_ticker_exists)
+                except (ValueError, PermissionError) as exc:
+                    errors.append(f"{ticker}: {exc}")
+            for msg in errors:
+                st.error(msg)
+            # Clear the picker so the row is ready for the next batch.
+            st.session_state.pop(add_key, None)
+            st.rerun()
 
     st.markdown('<hr class="wl-section-sep" />', unsafe_allow_html=True)
 
