@@ -213,8 +213,10 @@ def render_assistant_tab() -> None:
     #    container so new messages pin at the bottom while older ones scroll
     #    off the top — Claude-style behavior. The chat_input below sits
     #    outside the scroll area, fixed to the viewport bottom by its own CSS.
+    #    Height sized to leave room for the fixed chat input at the bottom
+    #    (chat input + its padding + bottom margin ~ 9rem = ~144px).
     pending = st.session_state.get(_PENDING_PROMPT_KEY)
-    with st.container(height=560, border=False):
+    with st.container(height=620, border=False):
         for role, content, reply in st.session_state[_HISTORY_KEY]:
             avatar = _USER_AVATAR if role == "user" else _BOT_AVATAR
             with st.chat_message(role, avatar=avatar):

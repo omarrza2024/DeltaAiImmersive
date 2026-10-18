@@ -323,6 +323,17 @@ def main() -> None:
            tabs there are. More reliable than flex:1, which Streamlit's own
            min-width rules can defeat. html body prefix maxes specificity so
            our rules beat Streamlit's injected stylesheet. */
+        /* Make the whole stTabs element sticky so the tab bar inside it
+           stays glued to the top as the user scrolls. Sticky on the
+           container (not the tablist) survives Streamlit's inner overflow
+           settings. top: 2.75rem clears Streamlit's own header. */
+        html body div.stTabs,
+        html body div[data-testid="stTabs"] {
+            position:sticky !important;
+            top:2.75rem !important;
+            z-index:50 !important;
+            background:#000000 !important;
+        }
         html body div.stTabs div[data-baseweb="tab-list"],
         html body div[data-testid="stTabs"] div[data-baseweb="tab-list"],
         html body div[data-testid="stTabs"] div[role="tablist"] {
@@ -635,36 +646,30 @@ def main() -> None:
             margin-bottom:0.6rem !important;
         }
 
-        /* === CHAT INPUT: Claude-style, pinned to viewport bottom ===
-           Streamlit tabs don't give st.chat_input a scrolling parent, so
-           position: sticky falls back to static (the input scrolls with the
-           page). position: fixed anchors it to the viewport bottom instead,
-           so messages scroll up while the input stays glued to one spot.
-           Padding-bottom on the main container prevents the last message
-           from being hidden behind the fixed input. */
+        /* === CHAT INPUT: pinned to the viewport bottom, full width ===
+           Fixed positioning so it stays put while content scrolls above.
+           left:0, right:0 so it stretches edge-to-edge regardless of the
+           sidebar state — Streamlit's sidebar renders on its own layer so
+           this still visually sits in the content area. z-index 60 keeps
+           it above everything, including the st.container scroll box. */
         html body [data-testid="stChatInput"] {
             position:fixed !important;
             bottom:0 !important;
-            /* Clear the sidebar on the left (default 21rem when expanded). */
-            left:21rem !important;
+            left:0 !important;
             right:0 !important;
-            width:auto !important;
+            width:100% !important;
             background:#000000 !important;
             padding:1rem 1.5rem 1.5rem !important;
-            z-index:50 !important;
+            z-index:60 !important;
             border-top:1px solid #1E2027 !important;
         }
-        /* When the sidebar is collapsed, Streamlit removes its width — reset
-           our left offset to zero so the chat input stretches edge-to-edge. */
-        html body:has([data-testid="stSidebar"][aria-expanded="false"]) [data-testid="stChatInput"] {
-            left:0 !important;
-        }
-        /* Reserve space at the bottom of the page so the last chat bubble
-           isn't tucked under the fixed input. */
+        /* Big bottom padding on the main container so the last line of chat
+           history never slides underneath the fixed chat input. Also leaves
+           room on non-chat tabs so plotly charts don't bleed under it. */
         html body .main .block-container,
         html body section.main .block-container,
         html body [data-testid="stMain"] .block-container {
-            padding-bottom:8rem !important;
+            padding-bottom:9rem !important;
         }
         /* ONE visible border only — the outermost baseweb textarea wrapper.
            Every nested baseweb div (base-input, input, textarea itself) has
