@@ -208,29 +208,56 @@ def render_assistant_tab() -> None:
     assistant = _init_state()
     _, state = st.session_state[_STATE_KEY]
 
-    # 1) Render all finished history top-to-bottom.
-    for role, content, reply in st.session_state[_HISTORY_KEY]:
-        avatar = _USER_AVATAR if role == "user" else _BOT_AVATAR
-        with st.chat_message(role, avatar=avatar):
-            st.markdown(content)
-            if reply is not None:
-                _render_recommendations(reply)
-
-    # 2) If a prompt is pending (the user just hit Enter and we rerendered
-    #    before calling the LLM), show their message + the typing dots.
-    #    Rendered BEFORE chat_input so they visually appear above the input.
+    # 1) Render the full chat history + any pending turn INSIDE a scrollable
+    #    container so new messages pin at the bottom while older ones scroll
+    #    off the top — Claude-style behavior. The chat_input below sits
+    #    outside the scroll area, fixed to the viewport bottom by its own CSS.
     pending = st.session_state.get(_PENDING_PROMPT_KEY)
-    if pending:
-        with st.chat_message("user", avatar=_USER_AVATAR):
-            st.markdown(pending)
-        with st.chat_message("assistant", avatar=_BOT_AVATAR):
-            st.markdown(
-                '<div class="typing-indicator"><span></span><span></span><span></span></div>',
-                unsafe_allow_html=True,
-            )
+    with st.container(height=560, border=False):
+        for role, content, reply in st.session_state[_HISTORY_KEY]:
+            avatar = _USER_AVATAR if role == "user" else _BOT_AVATAR
+            with st.chat_message(role, avatar=avatar):
+                st.markdown(content)
+                if reply is not None:
+                    _render_recommendations(reply)
 
-    # 3) Chat input is always rendered LAST so Streamlit pins it to the bottom
-    #    of the tab, below the user's just-sent message and the typing dots.
+        # Pending turn: user just hit Enter but the LLM hasn't replied yet.
+        # Render their message + typing dots as the LAST items in the scroll
+        # container so the view auto-scrolls to show them.
+        if pending:
+            with st.chat_message("user", avatar=_USER_AVATAR):
+                st.markdown(pending)
+            with st.chat_message("assistant", avatar=_BOT_AVATAR):
+                st.markdown(
+                    '<div class="typing-indicator"><span></span><span></span><span></span></div>',
+                    unsafe_allow_html=True,
+                )
+
+    # Auto-scroll the chat history to its bottom after each rerun so the
+    # newest message always lands in view — Streamlit's st.container(height=)
+    # creates a scrollable div but doesn't scroll to end on its own.
+    st.markdown(
+        """
+        <script>
+          // Pick the LAST st.container with a fixed height — that's our chat
+          // history. requestAnimationFrame waits for layout to settle so the
+          // scroll jump lands on the real final height, not a mid-render one.
+          const scrollers = window.parent.document.querySelectorAll(
+            '[data-testid="stVerticalBlockBorderWrapper"][style*="height"]'
+          );
+          const target = scrollers[scrollers.length - 1];
+          if (target) {
+            const inner = target.querySelector('[data-testid="stVerticalBlock"]') || target;
+            requestAnimationFrame(() => { inner.scrollTop = inner.scrollHeight; });
+            requestAnimationFrame(() => { target.scrollTop = target.scrollHeight; });
+          }
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Chat input stays outside the scroll container, pinned to the viewport
+    # bottom by its own fixed-position CSS in app.py.
     prompt = st.chat_input("Type your answer or ask a follow-up…")
     if prompt and not pending:
         # Stash the prompt and rerun to display it immediately — the next
