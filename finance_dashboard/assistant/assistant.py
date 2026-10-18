@@ -45,6 +45,7 @@ from finance_dashboard.recommender.models import (
 from finance_dashboard.recommender.recommender import StockRecommender
 from finance_dashboard.recommender.universe import PREDEFINED_UNIVERSES
 from finance_dashboard.sentiment import SentimentResult, fetch_sentiment
+from finance_dashboard.widgets import POPULAR_TICKERS
 
 DISCLAIMER = "Historical data does not guarantee future returns."
 
@@ -497,12 +498,34 @@ class InvestmentAssistant:
             f"What you already know: {_describe_known(state.goal)}.\n"
             f"Still missing: {_describe_missing(state.goal)}."
         )
+
+        # If the user is asking about news sentiment (even before any
+        # recommendations exist), pull marketaux data for any ticker they
+        # mentioned by name so the LLM can quote exact scores instead of
+        # saying "I don't have that info yet". Same context block format
+        # as the chat path, so the LLM already knows how to use it.
+        last_user_msg = next(
+            (m["content"] for m in reversed(state.messages) if m["role"] == "user"),
+            "",
+        )
+        gathering_sentiment: dict[str, SentimentResult] = {}
+        if _user_asked_about_sentiment(last_user_msg):
+            upper = last_user_msg.upper()
+            mentioned = [t for t in POPULAR_TICKERS if t in upper][:5]
+            for ticker in mentioned:
+                try:
+                    gathering_sentiment[ticker] = fetch_sentiment(ticker)
+                except Exception:
+                    continue
+        sentiment_block = _format_sentiment_context(gathering_sentiment)
+
         try:
             reply = self._llm(
                 _GATHERING_SYSTEM,
                 [
                     {"role": "system", "content": APP_KNOWLEDGE},
                     {"role": "system", "content": context},
+                    *([{"role": "system", "content": sentiment_block}] if sentiment_block else []),
                     *state.messages[-8:],
                 ],
             )

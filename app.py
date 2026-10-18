@@ -663,54 +663,47 @@ def main() -> None:
         html body [data-testid="stMain"] .block-container {
             padding-bottom:8rem !important;
         }
-        html body [data-testid="stChatInput"] textarea,
-        html body [data-testid="stChatInput"] div[data-baseweb="textarea"],
-        html body [data-testid="stChatInput"] div[data-baseweb="base-input"],
-        html body [data-testid="stChatInput"] div[data-baseweb="input"] {
+        /* ONE visible border only — the outermost baseweb textarea wrapper.
+           Every nested baseweb div (base-input, input, textarea itself) has
+           its border stripped so we don't paint concentric rectangles. */
+        html body [data-testid="stChatInput"] div[data-baseweb="textarea"] {
             background:#0E1015 !important;
             border:1px solid #262A33 !important;
             border-radius:14px !important;
-            padding:0.75rem 0.95rem !important;
-            font-size:14px !important;
             box-shadow:none !important;
             outline:none !important;
         }
-        /* Kill every variant of the focus ring (grey OR blue) that Streamlit
-           applies on hover/focus/active. The baseweb textarea wrapper is the
-           element that paints the ring the user sees — target it specifically. */
-        html body [data-testid="stChatInput"] textarea,
-        html body [data-testid="stChatInput"] textarea:hover,
-        html body [data-testid="stChatInput"] textarea:focus,
-        html body [data-testid="stChatInput"] textarea:focus-visible,
-        html body [data-testid="stChatInput"] textarea:active,
-        html body [data-testid="stChatInput"] div[data-baseweb="textarea"],
-        html body [data-testid="stChatInput"] div[data-baseweb="textarea"]:hover,
-        html body [data-testid="stChatInput"] div[data-baseweb="textarea"]:focus,
-        html body [data-testid="stChatInput"] div[data-baseweb="textarea"]:focus-within,
         html body [data-testid="stChatInput"] div[data-baseweb="base-input"],
-        html body [data-testid="stChatInput"] div[data-baseweb="base-input"]:hover,
-        html body [data-testid="stChatInput"] div[data-baseweb="base-input"]:focus-within,
         html body [data-testid="stChatInput"] div[data-baseweb="input"],
-        html body [data-testid="stChatInput"] div[data-baseweb="input"]:focus-within {
-            border-color:#262A33 !important;
+        html body [data-testid="stChatInput"] textarea {
+            background:transparent !important;
+            border:none !important;
             box-shadow:none !important;
             outline:none !important;
-            outline-color:transparent !important;
-            outline-style:none !important;
-            outline-width:0 !important;
-            outline-offset:0 !important;
+            padding:0.5rem 0.75rem !important;
+            font-size:14px !important;
         }
-        /* Streamlit's chat-input wrapper draws its own grey outline on
-           focus-within. Nuke that too. */
+        /* Nuke every focus-ring variant Streamlit paints — grey OR blue.
+           Apply to focus, focus-visible, focus-within, hover, active on
+           every element inside the chat input. */
         html body [data-testid="stChatInput"],
         html body [data-testid="stChatInput"]:focus-within,
+        html body [data-testid="stChatInput"] *,
+        html body [data-testid="stChatInput"] *:hover,
         html body [data-testid="stChatInput"] *:focus,
         html body [data-testid="stChatInput"] *:focus-visible,
-        html body [data-testid="stChatInput"] *:focus-within {
-            outline:none !important;
-            outline-color:transparent !important;
-            outline-style:none !important;
+        html body [data-testid="stChatInput"] *:focus-within,
+        html body [data-testid="stChatInput"] *:active {
+            outline:0 none transparent !important;
+            outline-offset:0 !important;
             box-shadow:none !important;
+            -webkit-tap-highlight-color:transparent !important;
+        }
+        /* The one exception: keep the subtle border on the outer textarea
+           wrapper even on focus — it just stays grey, no color change. */
+        html body [data-testid="stChatInput"] div[data-baseweb="textarea"]:focus-within,
+        html body [data-testid="stChatInput"] div[data-baseweb="textarea"]:hover {
+            border-color:#262A33 !important;
         }
 
         /* === TYPING DOTS — shows while waiting for the LLM === */
