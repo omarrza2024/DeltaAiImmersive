@@ -559,7 +559,8 @@ def _render_watchlist(wl: dict, username: str, db) -> None:
                 "Add a ticker",
                 options=opts,
                 default=[],
-                accept_new_options=True,
+                # Only tickers from the known universe may be added.
+                accept_new_options=False,
                 key=add_key,
                 label_visibility="collapsed",
                 placeholder="Type letters to search — pick one or more, then Add",

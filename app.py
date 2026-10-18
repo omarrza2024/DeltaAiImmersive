@@ -132,7 +132,9 @@ def _render_correlation_inputs(default_period: str) -> tuple[list[str], str, Non
         "Tickers",
         options=options,
         default=default_labels,
-        accept_new_options=True,
+        # Known universe only — unknown symbols are not accepted so a user
+        # can't accidentally include a delisted / typo'd ticker.
+        accept_new_options=False,
         key="corr_tickers",
     )
     period_label = st.selectbox(
@@ -219,7 +221,8 @@ def _render_recommender_tab(controller: VisualizationController, default_period:
             "Extra tickers (optional)",
             options=ticker_labels(),
             default=[],
-            accept_new_options=True,
+            # Only tickers from the known universe — no free-text picks.
+            accept_new_options=False,
             key="recommender_extra_tickers",
             placeholder="Type a letter to search (e.g. A for AAPL, AMD...)",
         )

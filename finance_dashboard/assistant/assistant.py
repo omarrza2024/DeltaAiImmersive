@@ -476,8 +476,18 @@ class InvestmentAssistant:
         # / "sec data" and we still have no sectors, use the FULL universe so
         # the engine can run. The user still saw the sector question — they
         # chose not to answer, which is a valid answer.
+        #
+        # We also inject the FULL S&P 500 via SPY's holdings here so the
+        # assistant draws from the same pool the Recommender tab does when
+        # a user picks "SPY" there — results now line up across both tabs.
         if not state.goal.sectors and _user_wants_any_sector(user_message):
             state.goal.sectors = sorted(PREDEFINED_UNIVERSES.keys())
+            # Pull in the full S&P 500 as custom tickers so the universe
+            # matches the Recommender's "SPY" selection.
+            from finance_dashboard.recommender.universe import ETF_FALLBACK_HOLDINGS
+            spy = tuple(ETF_FALLBACK_HOLDINGS.get("SPY", ()))
+            if spy:
+                state.custom_tickers = tuple(dict.fromkeys(state.custom_tickers + spy))
 
         # Count defaults to 5 whenever the user hasn't picked one — matches the
         # old UX where users who skip "how many?" still get a shortlist. Done

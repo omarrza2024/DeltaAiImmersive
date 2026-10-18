@@ -118,7 +118,9 @@ def ticker_select(
         options=options,
         default=default_list,
         max_selections=1,
-        accept_new_options=True,
+        # Lock to known universe only — the user asked that any ticker
+        # outside the database not be acceptable, so no accept_new_options.
+        accept_new_options=False,
         key=key,
         label_visibility=label_visibility,
         placeholder="Type a letter to search (e.g. A for AAPL, AMZN...)",
