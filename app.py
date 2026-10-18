@@ -664,6 +664,7 @@ def main() -> None:
             padding-bottom:8rem !important;
         }
         html body [data-testid="stChatInput"] textarea,
+        html body [data-testid="stChatInput"] div[data-baseweb="textarea"],
         html body [data-testid="stChatInput"] div[data-baseweb="base-input"],
         html body [data-testid="stChatInput"] div[data-baseweb="input"] {
             background:#0E1015 !important;
@@ -674,19 +675,42 @@ def main() -> None:
             box-shadow:none !important;
             outline:none !important;
         }
-        /* Kill every variant of the blue focus ring. Streamlit's baseweb
-           wrappers apply their own :focus-within styles that need matching. */
+        /* Kill every variant of the focus ring (grey OR blue) that Streamlit
+           applies on hover/focus/active. The baseweb textarea wrapper is the
+           element that paints the ring the user sees — target it specifically. */
+        html body [data-testid="stChatInput"] textarea,
+        html body [data-testid="stChatInput"] textarea:hover,
         html body [data-testid="stChatInput"] textarea:focus,
         html body [data-testid="stChatInput"] textarea:focus-visible,
         html body [data-testid="stChatInput"] textarea:active,
+        html body [data-testid="stChatInput"] div[data-baseweb="textarea"],
+        html body [data-testid="stChatInput"] div[data-baseweb="textarea"]:hover,
+        html body [data-testid="stChatInput"] div[data-baseweb="textarea"]:focus,
+        html body [data-testid="stChatInput"] div[data-baseweb="textarea"]:focus-within,
         html body [data-testid="stChatInput"] div[data-baseweb="base-input"],
+        html body [data-testid="stChatInput"] div[data-baseweb="base-input"]:hover,
         html body [data-testid="stChatInput"] div[data-baseweb="base-input"]:focus-within,
         html body [data-testid="stChatInput"] div[data-baseweb="input"],
         html body [data-testid="stChatInput"] div[data-baseweb="input"]:focus-within {
             border-color:#262A33 !important;
             box-shadow:none !important;
             outline:none !important;
+            outline-color:transparent !important;
+            outline-style:none !important;
+            outline-width:0 !important;
             outline-offset:0 !important;
+        }
+        /* Streamlit's chat-input wrapper draws its own grey outline on
+           focus-within. Nuke that too. */
+        html body [data-testid="stChatInput"],
+        html body [data-testid="stChatInput"]:focus-within,
+        html body [data-testid="stChatInput"] *:focus,
+        html body [data-testid="stChatInput"] *:focus-visible,
+        html body [data-testid="stChatInput"] *:focus-within {
+            outline:none !important;
+            outline-color:transparent !important;
+            outline-style:none !important;
+            box-shadow:none !important;
         }
 
         /* === TYPING DOTS — shows while waiting for the LLM === */

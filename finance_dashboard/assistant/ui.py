@@ -7,6 +7,7 @@ import textwrap
 
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 from finance_dashboard.assistant.assistant import (
     AssistantReply,
@@ -234,26 +235,40 @@ def render_assistant_tab() -> None:
                 )
 
     # Auto-scroll the chat history to its bottom after each rerun so the
-    # newest message always lands in view — Streamlit's st.container(height=)
-    # creates a scrollable div but doesn't scroll to end on its own.
-    st.markdown(
+    # newest message always lands in view. Runs in an iframe (components.html)
+    # that reaches up to window.parent.document to find the real container —
+    # Streamlit's st.container(height=) renders as a stVerticalBlock with
+    # overflow-y: auto. We retry with setTimeout and MutationObserver so late
+    # content (plotly sparklines, LLM reply) still triggers a scroll.
+    components.html(
         """
         <script>
-          // Pick the LAST st.container with a fixed height — that's our chat
-          // history. requestAnimationFrame waits for layout to settle so the
-          // scroll jump lands on the real final height, not a mid-render one.
-          const scrollers = window.parent.document.querySelectorAll(
-            '[data-testid="stVerticalBlockBorderWrapper"][style*="height"]'
-          );
-          const target = scrollers[scrollers.length - 1];
+          const doc = window.parent.document;
+          function findScroller() {
+            const vbs = doc.querySelectorAll('[data-testid="stVerticalBlock"]');
+            for (const el of vbs) {
+              const cs = window.parent.getComputedStyle(el);
+              if (cs.overflowY === 'auto' && el.offsetHeight >= 400) return el;
+            }
+            return null;
+          }
+          function scrollNow() {
+            const s = findScroller();
+            if (s) s.scrollTop = s.scrollHeight;
+          }
+          // Immediate + retries for anything that renders a beat late.
+          scrollNow();
+          [50, 150, 400, 800].forEach(t => setTimeout(scrollNow, t));
+          // Watch for DOM mutations inside the scroller (LLM streams, cards,
+          // sparklines added asynchronously) and re-scroll on each.
+          const target = findScroller();
           if (target) {
-            const inner = target.querySelector('[data-testid="stVerticalBlock"]') || target;
-            requestAnimationFrame(() => { inner.scrollTop = inner.scrollHeight; });
-            requestAnimationFrame(() => { target.scrollTop = target.scrollHeight; });
+            new MutationObserver(() => { target.scrollTop = target.scrollHeight; })
+              .observe(target, { childList: true, subtree: true });
           }
         </script>
         """,
-        unsafe_allow_html=True,
+        height=0,
     )
 
     # Chat input stays outside the scroll container, pinned to the viewport
