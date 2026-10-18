@@ -13,15 +13,33 @@ from finance_dashboard.recommender.models import RecommendationRequest
 # full set of Select Sector SPDR ETFs so a user can pick any slice they want.
 ETF_FALLBACK_HOLDINGS: dict[str, list[str]] = {
     # --- Broad-market / major indices ---
-    "SPY":  ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "BRK-B", "LLY", "JPM", "UNH",
-             "XOM", "V", "JNJ", "PG", "HD"],
-    "VOO":  ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "BRK-B", "LLY", "JPM", "UNH"],
-    "QQQ":  ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "AVGO", "TSLA", "COST", "NFLX",
-             "AMD", "PEP", "ADBE", "CSCO", "INTU"],
+    # SPY tracks the S&P 500. Live yfinance holdings often return <20; the
+    # fallback below covers the top ~50 by market cap so the Recommender
+    # has a meaningful universe when offline. VOO (also S&P 500) and VTI
+    # (total market) inherit the same list — their top-50 is nearly identical.
+    "SPY":  ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "BRK-B", "LLY", "JPM",
+             "UNH", "XOM", "V", "JNJ", "PG", "HD", "MA", "AVGO", "COST", "CVX",
+             "ABBV", "WMT", "KO", "PEP", "ADBE", "ORCL", "MRK", "BAC", "CRM", "TMO",
+             "ACN", "LIN", "MCD", "AMD", "NFLX", "ABT", "CSCO", "TMUS", "DIS", "WFC",
+             "DHR", "PFE", "INTC", "QCOM", "VZ", "TXN", "COP", "AMGN", "PM", "INTU"],
+    "VOO":  ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "BRK-B", "LLY", "JPM",
+             "UNH", "XOM", "V", "JNJ", "PG", "HD", "MA", "AVGO", "COST", "CVX",
+             "ABBV", "WMT", "KO", "PEP", "ADBE", "ORCL", "MRK", "BAC", "CRM", "TMO",
+             "ACN", "LIN", "MCD", "AMD", "NFLX", "ABT", "CSCO", "TMUS", "DIS", "WFC",
+             "DHR", "PFE", "INTC", "QCOM", "VZ", "TXN", "COP", "AMGN", "PM", "INTU"],
+    "VTI":  ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "BRK-B", "LLY", "JPM",
+             "UNH", "XOM", "V", "JNJ", "PG", "HD", "MA", "AVGO", "COST", "CVX",
+             "ABBV", "WMT", "KO", "PEP", "ADBE", "ORCL", "MRK", "BAC", "CRM", "TMO",
+             "ACN", "LIN", "MCD", "AMD", "NFLX", "ABT", "CSCO", "TMUS", "DIS", "WFC"],
+    "QQQ":  ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "AVGO", "TSLA", "COST",
+             "NFLX", "AMD", "PEP", "ADBE", "CSCO", "INTU", "TMUS", "QCOM", "AMGN", "TXN",
+             "HON", "AMAT", "BKNG", "ISRG", "LRCX", "ADI", "PANW", "VRTX", "KLAC", "MU",
+             "SBUX", "GILD", "MDLZ", "ADP", "REGN", "SNPS", "CDNS", "PYPL", "ASML", "MELI"],
     "DIA":  ["UNH", "GS", "MSFT", "HD", "CRM", "V", "MCD", "CAT", "AXP", "AMGN",
-             "SHW", "TRV", "HON", "IBM", "JPM"],
-    "IWM":  ["SMCI", "STRL", "ANF", "FTAI", "APPF", "ONTO", "MLI", "FLR", "FIX", "RMBS"],
-    "VTI":  ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "BRK-B", "LLY", "JPM"],
+             "SHW", "TRV", "HON", "IBM", "JPM", "BA", "AAPL", "AMZN", "JNJ", "PG",
+             "NVDA", "NKE", "DIS", "MRK", "WMT", "CSCO", "KO", "CVX", "MMM", "VZ"],
+    "IWM":  ["SMCI", "STRL", "ANF", "FTAI", "APPF", "ONTO", "MLI", "FLR", "FIX", "RMBS",
+             "COMM", "BMI", "MARA", "RIOT", "APP", "SPSC", "CRS", "AIT", "CRVL", "ENSG"],
     # --- SPDR Select Sector ETFs ---
     "XLK":  ["AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "CSCO", "AMD", "ADBE", "ACN",
              "IBM", "INTU", "NOW", "TXN", "QCOM"],

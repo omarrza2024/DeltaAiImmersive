@@ -331,11 +331,26 @@ def main() -> None:
             border-bottom:1px solid #1E2027 !important;
             background:#000000 !important;
             overflow:hidden !important;
-            /* Pin the tablist to the top of the viewport so the active tab
-               stays accessible while the user scrolls the content below. */
-            position:sticky !important;
+            /* Fixed positioning (sticky doesn't survive Streamlit's nested
+               overflow layouts). Pin to the top of the viewport, cleared on
+               the left by the sidebar's default 21rem width. */
+            position:fixed !important;
             top:0 !important;
-            z-index:40 !important;
+            left:21rem !important;
+            right:0 !important;
+            z-index:60 !important;
+        }
+        /* When sidebar is collapsed, Streamlit's :has() tells us so — slide
+           the fixed tab bar back to the left edge. */
+        html body:has([data-testid="stSidebar"][aria-expanded="false"])
+            div[data-testid="stTabs"] div[data-baseweb="tab-list"] {
+            left:0 !important;
+        }
+        /* Fixed tabs leave a gap at the top of the content area — pad the
+           main container down so the TRADEMATRIX header isn't hidden. */
+        html body section.main .block-container,
+        html body [data-testid="stMain"] .block-container {
+            padding-top:4rem !important;
         }
 
         html body div.stTabs button[data-baseweb="tab"],
