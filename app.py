@@ -329,8 +329,13 @@ def main() -> None:
             width:100% !important;
             gap:0 !important;
             border-bottom:1px solid #1E2027 !important;
-            background:transparent !important;
+            background:#000000 !important;
             overflow:hidden !important;
+            /* Pin the tablist to the top of the viewport so the active tab
+               stays accessible while the user scrolls the content below. */
+            position:sticky !important;
+            top:0 !important;
+            z-index:40 !important;
         }
 
         html body div.stTabs button[data-baseweb="tab"],

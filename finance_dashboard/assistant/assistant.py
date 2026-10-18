@@ -531,7 +531,10 @@ class InvestmentAssistant:
             )
             if not reply.strip():
                 raise RuntimeError("empty response")
-            return self._record(state, reply.strip())
+            # Carry any sentiment we fetched into the reply so the UI can
+            # render the per-ticker article expanders, same as _chat does.
+            state.messages.append({"role": "assistant", "content": reply.strip()})
+            return AssistantReply(message=reply.strip(), sentiment=gathering_sentiment)
         except Exception:
             # Composer failed — fall back to the scripted next question so we
             # never leave the user with nothing.
