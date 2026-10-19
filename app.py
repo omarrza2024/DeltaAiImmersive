@@ -284,7 +284,14 @@ def main() -> None:
         }
 
         /* === TERMINAL HEADER === */
-        .block-container { padding-top: 3rem; padding-bottom: 3rem; max-width: 1400px; }
+        /* Streamlit's native header is hidden further down, so the main
+           container can own the very top of the viewport. */
+        .block-container,
+        [data-testid="stMainBlockContainer"] {
+            padding-top: 1rem !important;
+            padding-bottom: 3rem !important;
+            max-width: 1400px !important;
+        }
         .term-header {
             display:flex; align-items:baseline; justify-content:space-between;
             padding:0.55rem 0.95rem; margin:0 0 1rem;
@@ -303,72 +310,86 @@ def main() -> None:
         }
         .term-meta span.dot { color:#22C55E; margin-right:0.3rem; }
 
-        /* === TABS: full-width, uppercase, no overlap ===
-           Streamlit's own stylesheet sets display: flex and some tab padding
-           on the tab-list; we override hard with max specificity + important.
-           Target every variant Streamlit has shipped: [data-baseweb="tab"],
-           button[role="tab"], and [data-testid="stTabs"] descendants.
+        /* === TABS: full-width, uppercase, sticky to the top ===
+           What previously fought us on Streamlit Cloud:
+             - position:sticky on .stTabs kept being overridden by inline
+               styles the renderer injects on the test-id container, and
+               Streamlit's own native header covered us when z-index tied.
+             - grid-auto-columns:1fr sometimes lost to Streamlit's inline
+               flex-basis declaration on the tab-list.
+           Fix: hide Streamlit's native toolbar entirely so the top of the
+           page is OURS, then use plain flex:1 + min-width:0 on each tab
+           button so every tab takes an equal slot without depending on a
+           parent display:grid that Streamlit may rewrite inline. */
 
-           Two things that previously failed on the deployed app:
-           1) `overflow: hidden` on the tablist, so tabs can't horizontally
-              scroll out of view and flex:1 actually spreads them.
-           2) styling the inner <p> — Streamlit wraps every tab label in a
-              <p> whose own typography was swallowing the uppercase/weight
-              rules set on the <button> itself. */
+        /* Nuke Streamlit's own top header (hamburger + Deploy pill) — we
+           own the top strip so sticky tabs have nothing to compete with. */
+        [data-testid="stHeader"],
+        header[data-testid="stHeader"],
+        [data-testid="stToolbar"],
+        [data-testid="stDecoration"],
+        [data-testid="stStatusWidget"] {
+            display:none !important;
+            height:0 !important;
+            visibility:hidden !important;
+        }
+        .stApp > header { display:none !important; }
+
         div.stTabs,
         div[data-testid="stTabs"] { width:100% !important; }
 
-        /* CSS Grid instead of flex — grid-auto-flow:column + grid-auto-columns:1fr
-           makes every tab share the full width equally regardless of how many
-           tabs there are. More reliable than flex:1, which Streamlit's own
-           min-width rules can defeat. html body prefix maxes specificity so
-           our rules beat Streamlit's injected stylesheet. */
-        /* Make the whole stTabs element sticky so the tab bar inside it
-           stays glued to the top as the user scrolls. Sticky on the
-           container (not the tablist) survives Streamlit's inner overflow
-           settings. top: 2.75rem clears Streamlit's own header. */
+        /* Sticky tabs: pinned to the viewport top. The native header is
+           hidden above, so top:0 is enough. Both selectors so whichever
+           class Streamlit renders this release gets the rule. */
         html body div.stTabs,
         html body div[data-testid="stTabs"] {
             position:sticky !important;
-            top:2.75rem !important;
-            z-index:50 !important;
+            top:0 !important;
+            z-index:999 !important;
             background:#000000 !important;
+            padding-top:0.4rem !important;
+            margin-top:0 !important;
         }
+
+        /* Flex layout on the tablist — more compatible than grid because
+           Streamlit's inline style on this element is already flex, so
+           our !important rules don't fight a different display mode. */
         html body div.stTabs div[data-baseweb="tab-list"],
         html body div[data-testid="stTabs"] div[data-baseweb="tab-list"],
-        html body div[data-testid="stTabs"] div[role="tablist"] {
-            display:grid !important;
-            grid-auto-flow:column !important;
-            grid-auto-columns:1fr !important;
+        html body div[data-testid="stTabs"] div[role="tablist"],
+        html body div.stTabs [role="tablist"] {
+            display:flex !important;
+            flex-wrap:nowrap !important;
             width:100% !important;
             gap:0 !important;
             border-bottom:1px solid #1E2027 !important;
             background:#000000 !important;
-            overflow:hidden !important;
+            overflow:visible !important;
         }
 
+        /* Each tab = equal slot. flex:1 1 0 + min-width:0 forces every
+           button to share the width — matches what the old working
+           deploy had. */
         html body div.stTabs button[data-baseweb="tab"],
         html body div.stTabs button[role="tab"],
         html body div[data-testid="stTabs"] button[data-baseweb="tab"],
         html body div[data-testid="stTabs"] button[role="tab"] {
-            width:100% !important;
+            flex:1 1 0 !important;
+            width:auto !important;
             min-width:0 !important;
             max-width:none !important;
             display:flex !important;
             align-items:center !important;
             justify-content:center !important;
             text-align:center !important;
-            /* Equal vertical padding = perfect vertical centering of label. */
-            padding:1.1rem 0.75rem !important;
+            padding:1rem 0.5rem !important;
             margin:0 !important;
-            margin-bottom:-1px !important; /* overlap the tablist baseline */
+            margin-bottom:-1px !important;
+            height:auto !important;
             color:#6B7280 !important;
             background:transparent !important;
             border:none !important;
-            /* Brighter divider between tabs so the "boxes" read as symmetric. */
             border-right:1px solid #2A303A !important;
-            /* Reserve the underline on every tab so the selected state is a
-               pure recolor — no vertical shift, perfect alignment. */
             border-bottom:2px solid transparent !important;
             border-radius:0 !important;
             box-shadow:none !important;
@@ -381,8 +402,8 @@ def main() -> None:
             border-right:none !important;
         }
 
-        /* Streamlit wraps each tab label in a <p>; its own typography beats
-           anything set on the <button>, so we restate font rules here too. */
+        /* Streamlit wraps each tab label in a <p> whose own typography
+           otherwise swallows the uppercase/weight rules on the parent. */
         div.stTabs button[data-baseweb="tab"] p,
         div.stTabs button[role="tab"] p,
         div[data-testid="stTabs"] button[data-baseweb="tab"] p,
@@ -390,9 +411,9 @@ def main() -> None:
         div.stTabs button[data-baseweb="tab"] div[data-testid="stMarkdownContainer"] p,
         div[data-testid="stTabs"] button[role="tab"] div[data-testid="stMarkdownContainer"] p {
             font-family:"Inter", sans-serif !important;
-            font-size:0.9rem !important;
+            font-size:0.82rem !important;
             font-weight:600 !important;
-            letter-spacing:0.07em !important;
+            letter-spacing:0.06em !important;
             text-transform:uppercase !important;
             text-align:center !important;
             line-height:1.2 !important;
@@ -416,7 +437,6 @@ def main() -> None:
         div[data-testid="stTabs"] button[aria-selected="true"] {
             color:#3B82F6 !important;
             background:#0E1015 !important;
-            /* Underline the selected tab across its own slot only. */
             border-bottom-color:#3B82F6 !important;
         }
         div.stTabs button[aria-selected="true"] p,
@@ -424,7 +444,8 @@ def main() -> None:
             color:#3B82F6 !important;
         }
 
-        /* Kill the baseweb underline sliders Streamlit draws under the tabs. */
+        /* Kill baseweb's underline-slider so our own underline is the
+           only indicator and it never animates away mid-render. */
         div.stTabs [data-baseweb="tab-highlight"],
         div.stTabs [data-baseweb="tab-border"],
         div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
